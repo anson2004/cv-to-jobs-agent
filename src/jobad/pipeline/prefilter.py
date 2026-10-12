@@ -48,13 +48,16 @@ def location_terms(profile: CandidateProfile) -> set[str]:
     return terms
 
 
-def lexical_prior(job: Job, skills: set[str], core: set[str], lateral: set[str], locs: set[str] = frozenset()) -> float:
+def lexical_prior(job: Job, skills: set[str], core: set[str], lateral: set[str], locs: set[str] = frozenset(), *, local_first: bool = False) -> float:
     title = _tokens(job.title)
     tags = _tokens(" ".join(job.tags))
     desc = _tokens(job.description[:12000])
     score = 0.0
-    if job.remote or (_tokens(job.location) & locs):
-        score += 3.0  # where the candidate can actually work
+    in_place = bool(_tokens(job.location) & locs)
+    if in_place:
+        score += 4.0 if local_first else 3.0  # physically where the candidate wants to be
+    elif job.remote:
+        score += 2.0 if local_first else 3.0  # reachable, but not the asked-for place
     score += 3.0 * len(title & core)
     score += 1.0 * len(title & lateral)
     score += 2.0 * len(title & skills)
@@ -66,10 +69,16 @@ def lexical_prior(job: Job, skills: set[str], core: set[str], lateral: set[str],
     return round(score, 2)
 
 
-def rank_pool(jobs: list[Job], profile: CandidateProfile, queries: list[SearchQuery]) -> list[tuple[Job, float]]:
+def rank_pool(jobs: list[Job], profile: CandidateProfile, queries: list[SearchQuery], location: str | None = None) -> list[tuple[Job, float]]:
+    """With an explicit --location, that place drives the location terms and on-site beats remote."""
     skills = skill_terms(profile)
     core, lateral = role_terms(profile, queries)
-    locs = location_terms(profile)
-    scored = [(j, lexical_prior(j, skills, core, lateral, locs)) for j in jobs]
+    if location:
+        from .locate import wanted_terms
+
+        locs = wanted_terms(location) - {"eu", "europe"}
+    else:
+        locs = location_terms(profile)
+    scored = [(j, lexical_prior(j, skills, core, lateral, locs, local_first=bool(location))) for j in jobs]
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored

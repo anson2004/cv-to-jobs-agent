@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..schemas import Job, SearchQuery
-from ..sources import ALL_SOURCES, JobSource
+from ..sources import JobSource, build_sources
 from ..textutil import norm_key
 
 
@@ -38,8 +38,8 @@ def _dedup(jobs: list[Job]) -> list[Job]:
     return out
 
 
-def fetch_jobs(queries: list[SearchQuery], cache_dir: Path, offline: bool, sources: list[type[JobSource]] | None = None) -> FetchResult:
-    srcs = [S(cache_dir, offline=offline) for S in (sources or ALL_SOURCES)]
+def fetch_jobs(queries: list[SearchQuery], cache_dir: Path, offline: bool, sources: list[JobSource] | None = None) -> FetchResult:
+    srcs = sources if sources is not None else build_sources(cache_dir, offline)
     raw: list[Job] = []
     per_query: dict[str, int] = {}
     hits: Counter = Counter()

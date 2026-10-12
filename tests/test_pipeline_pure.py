@@ -58,3 +58,13 @@ def test_lexical_prior_prefers_matching_titles():
     ranked = [j.id for j, _ in rank_pool(jobs, profile, queries)]
     assert ranked[0] == "2"
     assert ranked[-1] == "3"
+
+
+def test_local_bonus_breaks_ties_only():
+    tampere = Job(id="t", source="d", title="Backend Engineer", company="Local Oy", url="u1", description="d", location="Tampere, Finland")
+    remote = Job(id="r", source="j", title="Backend Developer", company="Remote Inc", url="u2", description="d", location="Remote (Europe)", remote=True)
+    better_remote = Job(id="b", source="j", title="Platform Engineer", company="Great Inc", url="u3", description="d", location="Remote (Europe)", remote=True)
+    scores = [score("t", 4), score("r", 4), score("b", 5)]
+    picked = [j.id for j, _ in select_top([tampere, remote, better_remote], scores, k=3, location="Tampere")]
+    assert picked == ["b", "t", "r"]  # clearly better remote job still first; Tampere wins the tie
+    assert [j.id for j, _ in select_top([tampere, remote, better_remote], scores, k=3)][1] in ("t", "r")  # no location: no bonus

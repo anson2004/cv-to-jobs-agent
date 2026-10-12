@@ -17,11 +17,13 @@ from ..cv import cv_to_text
 from ..deliver.email import deliver
 from ..llm import LLM
 from ..schemas import QueryPlan, Recommendation, RunSummary
+from ..sources import build_sources
 from ..store import Store
 from ..trace import Tracer
 from .explain import explain
 from .extract import extract_profile
 from .fetch import fetch_jobs
+from .locate import filter_by_location
 from .agentic_plan import agentic_plan
 from .plan import plan_more, plan_queries
 from .prefilter import rank_pool
@@ -48,6 +50,7 @@ def run_pipeline(
     dry_run: bool = False,
     skip_sent: bool = True,
     agentic: bool = False,
+    location: str | None = None,
 ) -> RunSummary:
     s = settings
     run_id = new_run_id()
@@ -58,8 +61,11 @@ def run_pipeline(
     max_jobs = max_jobs or s.max_jobs_to_score
     top_k = top_k or s.top_k
     score_model = score_model or s.model_fast
+    location = location if location is not None else (s.location or None)
+    sources = build_sources(s.cache_dir, offline, duunitori=s.duunitori_enabled, area=location)
 
     console.rule(f"[bold]run {run_id}")
+    console.print(f"[dim]sources: {', '.join(x.name for x in sources)}" + (f"   location filter: {location}" if location else "") + "[/]")
 
     # 1. CV -> profile
     text = cv_to_text(cv_path)
@@ -68,7 +74,7 @@ def run_pipeline(
 
     # 2. profile -> queries (fixed single call, or the agent drives the search itself)
     if agentic:
-        ar = agentic_plan(llm, profile, s.model_strong, s.cache_dir, offline)
+        ar = agentic_plan(llm, profile, s.model_strong, s.cache_dir, offline, sources=sources)
         plan = ar.plan
         console.print(f"[green]agentic plan[/] {len(ar.searches)} searches over {ar.turns} turns" + ("  [yellow](forced submit)[/]" if ar.forced_submit else ""))
         for q, n in ar.searches:
@@ -79,24 +85,28 @@ def run_pipeline(
         console.print(f"  [cyan]{'lateral ' if q.lateral else '        '}[/]'{q.query}'  — {q.reason}")
 
     # 3. fetch + dedup, with one adaptive round if the pool is thin
-    fr = fetch_jobs(plan.queries, s.cache_dir, offline)
+    fr = fetch_jobs(plan.queries, s.cache_dir, offline, sources=sources)
     console.print(f"[green]fetch[/] {fr.fetched} raw -> {len(fr.jobs)} after dedup" + ("  [offline]" if offline else ""))
     if len(fr.jobs) < MIN_POOL:
         more = plan_more(llm, profile, fr.per_query, s.model_strong)
         console.print(f"[yellow]thin pool[/] planner added {len(more.queries)} queries: " + ", ".join(f"'{q.query}'" for q in more.queries))
         plan = QueryPlan(queries=plan.queries + more.queries)
-        fr = fetch_jobs(plan.queries, s.cache_dir, offline)
+        fr = fetch_jobs(plan.queries, s.cache_dir, offline, sources=sources)
         console.print(f"[green]fetch[/] {fr.fetched} raw -> {len(fr.jobs)} after dedup")
     store.upsert_jobs(run_id, fr.jobs)
 
     pool = fr.jobs
+    if location:
+        before = len(pool)
+        pool = filter_by_location(pool, location)
+        console.print(f"[green]location[/] {before} -> {len(pool)} in or open to {location}")
     if skip_sent:
         sent = store.already_sent()
         before = len(pool)
         pool = [j for j in pool if j.id not in sent]
         if before != len(pool):
             console.print(f"[green]memory[/] skipped {before - len(pool)} already-sent jobs")
-    ranked = rank_pool(pool, profile, plan.queries)
+    ranked = rank_pool(pool, profile, plan.queries, location=location)
     pool = [j for j, _ in ranked[:max_jobs]]
     if ranked:
         console.print(f"[green]prefilter[/] lexical prior: top {len(pool)} of {len(ranked)} (scores {ranked[0][1]:.1f} … {ranked[min(len(pool), len(ranked)) - 1][1]:.1f}); e.g. '{pool[0].title}' @ {pool[0].company}")
@@ -116,7 +126,7 @@ def run_pipeline(
     console.print(f"  scored {len(scores)}/{len(pool)}; {dealbreakers} dealbreaker hits; best overall {max((x.overall for x in scores), default=0):.2f}")
 
     # 5. select + explain
-    picks = select_top(pool, scores, top_k)
+    picks = select_top(pool, scores, top_k, location=location)
     try:
         recs = explain(llm, profile, picks, s.model_strong)
     except Exception as e:  # the email must still go out with the scorer's own notes

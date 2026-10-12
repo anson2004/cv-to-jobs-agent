@@ -195,3 +195,8 @@ paragraph saying this.
   1.4K for the fixed planner; reasons cite search evidence. Groq rejects a
   request outright if a forced tool_choice is violated, so the forced turn
   removes the search tool instead of only forcing the choice.
+- Finland/Tampere: default sources have ~0 Finnish jobs. Added `--location`
+  hard filter (city/country or remote-open-to-region) and an opt-in Duunitori
+  feed source (undocumented endpoint, robots.txt disallows bots; personal use,
+  DUUNITORI_ENABLED=true). Official alternative is Työmarkkinatori's API
+  (needs Y-tunnus + key).

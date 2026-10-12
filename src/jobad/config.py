@@ -32,6 +32,11 @@ class Settings:
     description_chars: int = field(default_factory=lambda: int(_env("DESCRIPTION_CHARS", "1800")))
     top_k: int = 4
 
+    # Location filter (e.g. "Tampere"); empty = no filter. Also selects Duunitori's area.
+    location: str = field(default_factory=lambda: _env("LOCATION"))
+    # Duunitori is opt-in: undocumented endpoint, robots.txt disallows bots. Personal use only.
+    duunitori_enabled: bool = field(default_factory=lambda: _env("DUUNITORI_ENABLED", "false").lower() in ("1", "true", "yes"))
+
     # Delivery
     resend_api_key: str = field(default_factory=lambda: _env("RESEND_API_KEY"))
     to_email: str = field(default_factory=lambda: _env("TO_EMAIL"))

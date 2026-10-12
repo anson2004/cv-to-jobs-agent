@@ -23,7 +23,7 @@ from openai import BadRequestError
 from ..llm import LLM
 from ..prompts import load_prompt
 from ..schemas import CandidateProfile, QueryPlan, SearchQuery
-from ..sources import ALL_SOURCES, JobSource
+from ..sources import ALL_SOURCES, JobSource, build_sources
 
 MAX_SEARCHES = 8
 MAX_TURNS = 10
@@ -105,8 +105,8 @@ def _search_tool(sources: list[JobSource], query: str) -> str:
     return json.dumps({"query": query, "matches": len(jobs), "sample": sample})
 
 
-def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Path, offline: bool = False) -> AgenticResult:
-    sources = [S(cache_dir, offline=offline) for S in ALL_SOURCES]
+def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Path, offline: bool = False, sources: list[JobSource] | None = None) -> AgenticResult:
+    sources = sources if sources is not None else [S(cache_dir, offline=offline) for S in ALL_SOURCES]
     system = (
         load_prompt("plan_queries")
         + "\n\nYou have a search_jobs tool. Use it: try a query, look at the matches and sample titles, then refine. "

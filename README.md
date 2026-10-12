@@ -77,6 +77,42 @@ full runs plus one eval per model per day. `--max-jobs` caps it; `MODEL_FAST`
 and `MODEL_STRONG` in `.env` move work to a different model's budget. To send real email set
 `RESEND_API_KEY` and `TO_EMAIL` in `.env` and drop `--dry-run`.
 
+## Limiting to a place, and the Finnish source
+
+```bash
+uv run jobad run --dry-run --location Tampere my_cv.pdf
+```
+
+`--location` (or `LOCATION` in `.env`) keeps a posting if it is in that city
+or country, or if it is remote and open to a region that includes it. A remote
+job restricted to the USA is not a job in Tampere. The rule is in
+`src/jobad/pipeline/locate.py` and unit tested.
+
+With a location set, two deterministic preferences kick in: the prefilter
+ranks on-site postings above remote ones when choosing which jobs get a model
+call, and selection adds a small bonus (0.3 on a 0-5 scale) to on-site
+postings and prefers them on equal scores. A clearly better remote job still
+wins; a tie goes to Tampere. Both rules are in code and unit tested, because
+"how much do you prefer local" is product policy, not something to ask a
+model to guess.
+
+The three default sources hold almost nothing Finnish, so a Finnish run needs
+**Duunitori**, Finland's largest board. Its JSON endpoint works and filters by
+city, but it is undocumented and `duunitori.fi/robots.txt` disallows automated
+access. So it is **off by default** and enabled only with
+`DUUNITORI_ENABLED=true`, for personal use: a dozen requests per run with an
+identifying User-Agent, a pause between calls, and everything cached. If you
+publish or scale this, use the official Työmarkkinatori search API instead,
+which needs a Finnish business ID and an API key. The README says "no
+scraping" above; this is the one deliberate exception, and it is opt-in so the
+default configuration keeps the promise.
+
+Duunitori's search ANDs its terms and matches titles, so a planner query like
+"backend engineer python" returns nothing for a city of Tampere's size. The
+source is therefore a feed: a dozen broad tech terms are swept for the area
+once per run, and the planner's queries are applied locally with any-term
+matching, since Finnish postings still carry the English tech words.
+
 ## Evaluation
 
 The scorer is the only part whose quality is hard to see by eye, so it has an
