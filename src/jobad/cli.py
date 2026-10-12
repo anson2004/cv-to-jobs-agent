@@ -36,15 +36,29 @@ def profile(cv: Path = typer.Argument(DEFAULT_CV)):
 
 
 @app.command()
-def plan(cv: Path = typer.Argument(DEFAULT_CV)):
+def plan(
+    cv: Path = typer.Argument(DEFAULT_CV),
+    agentic: bool = typer.Option(False, help="Let the model search with a tool and refine, instead of one blind call."),
+    offline: bool = typer.Option(False, help="Searches read the cache only."),
+):
     """Steps 3-4: profile, then the search queries the agent would run."""
     from .cv import cv_to_text
     from .pipeline.extract import extract_profile
-    from .pipeline.plan import plan_queries
 
     s, llm = _llm("adhoc-plan")
     p = extract_profile(llm, cv_to_text(cv), s.model_strong)
-    q = plan_queries(llm, p, s.model_strong)
+    if agentic:
+        from .pipeline.agentic_plan import agentic_plan
+
+        ar = agentic_plan(llm, p, s.model_strong, s.cache_dir, offline)
+        console.print(f"{len(ar.searches)} searches over {ar.turns} turns" + ("  (forced submit)" if ar.forced_submit else ""))
+        for q_, n in ar.searches:
+            console.print(f"  searched '{q_}' -> {n} matches")
+        q = ar.plan
+    else:
+        from .pipeline.plan import plan_queries
+
+        q = plan_queries(llm, p, s.model_strong)
     t = Table("query", "lateral", "reason")
     for x in q.queries:
         t.add_row(x.query, "yes" if x.lateral else "", x.reason)
@@ -63,11 +77,12 @@ def run(
     score_model: str = typer.Option(None, help="Override the scoring model."),
     dry_run: bool = typer.Option(False, help="Render the email to disk, do not send, do not mark as sent."),
     include_sent: bool = typer.Option(False, help="Do not filter out previously sent jobs."),
+    agentic: bool = typer.Option(False, help="Agentic planning: the model searches with a tool and refines its queries."),
 ):
     """Full pipeline: CV -> queries -> fetch -> score -> top-k -> explain -> email."""
     from .pipeline.run import run_pipeline
 
-    run_pipeline(cv, Settings(), offline=offline, max_jobs=max_jobs, top_k=top_k, prompt_version=prompt_version, score_model=score_model, dry_run=dry_run, skip_sent=not include_sent)
+    run_pipeline(cv, Settings(), offline=offline, max_jobs=max_jobs, top_k=top_k, prompt_version=prompt_version, score_model=score_model, dry_run=dry_run, skip_sent=not include_sent, agentic=agentic)
 
 
 @app.command()

@@ -180,6 +180,36 @@ class LLM:
             p["response_format"] = {"type": "json_object"}
         return p
 
+    # ---- tool use (agentic planning) -----------------------------------
+    def chat_with_tools(
+        self,
+        *,
+        step: str,
+        model: str,
+        messages: list[dict],
+        tools: list[dict],
+        tool_choice: str | dict = "auto",
+        reasoning_effort: str = "medium",
+        max_tokens: int = 1500,
+        meta: dict | None = None,
+    ):
+        """One assistant turn that may contain tool calls. Returns the message
+        object; the caller executes tools and appends results. Traced like any call."""
+        t0 = time.time()
+        resp = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            max_tokens=max_tokens,
+            temperature=0.2,
+            extra_body={"reasoning_effort": reasoning_effort, "reasoning_format": "hidden"},
+        )
+        msg = resp.choices[0].message
+        calls = [{"name": tc.function.name, "arguments": tc.function.arguments[:300]} for tc in (msg.tool_calls or [])]
+        self._trace(step, model, resp, t0, True, 1, {"tool_calls": calls, "content": (msg.content or "")[:500]}, None, meta)
+        return msg
+
     # ---- helpers --------------------------------------------------------
     @staticmethod
     def _messages(schema: type[BaseModel], system: str, user: str) -> list[dict]:

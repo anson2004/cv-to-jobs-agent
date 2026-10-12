@@ -17,12 +17,35 @@ CV (pdf) ──▶ extract profile ──▶ plan queries ──▶ fetch + dedu
            [code]        [LLM]                 [code]                    [code]
 ```
 
+## Two planning modes: fixed and agentic
+
+```bash
+uv run jobad run --dry-run my_cv.pdf              # fixed: one planning call
+uv run jobad run --dry-run --agentic my_cv.pdf    # agentic: the model searches, reads results, refines, submits
+```
+
+| | Fixed planner | Agentic planner (`--agentic`) |
+|---|---|---|
+| Mechanism | One structured call returns 6-8 queries | Tool loop: `search_jobs(query)` returns match count + sample titles; `submit_plan(queries)` ends it |
+| Model calls | 1 | 4-10 (cap: 8 searches, 10 turns, then forced submit) |
+| Tokens, measured | ~1.4K | ~18K |
+| Queries chosen with | The profile only | The profile plus what each search actually returned |
+| Reasons look like | "Targets his Python backend experience" | "Returned senior Golang roles like 'Staff/Senior Software Engineer - Hydris' which match…" |
+| Failure modes handled | Schema validation + one retry | Budget caps, forced submit with the search tool removed, recovery when the model emits an invalid call, fallback plan from the searches it did run |
+
+The fixed planner is the default because the eval could not show the agentic
+one picks better jobs, only that it explains its queries better, and it costs
+ten times the tokens for that step. Both stay in the repo so the trade can be
+shown rather than asserted. The loop is 150 lines in
+`src/jobad/pipeline/agentic_plan.py`, with two tests that drive it with a fake
+model and no network.
+
 ## Where the model is used, and where it is not
 
 | Stage | LLM? | Model | Why |
 |---|---|---|---|
 | CV → structured profile | yes | gpt-oss-120b | Reading prose into a schema is what models are for |
-| Profile → search queries | yes | gpt-oss-120b | Needs judgment about adjacent roles the candidate would not search for |
+| Profile → search queries | yes | gpt-oss-120b | Needs judgment about adjacent roles the candidate would not search for; optionally a tool loop (`--agentic`) |
 | Fetch, normalise, dedup | no | | Deterministic, cacheable, free |
 | Lexical prefilter: which 40 of 600+ get a model call | no | | A testable heuristic beats spending tokens on office-assistant postings |
 | Score each job (4 dimensions) | yes | qwen3.8-27b | Fuzzy judgment, but a small model because it runs N times; chosen by the eval below |
@@ -155,11 +178,12 @@ and get the 120b model. The eval picked which small model.
 four near-identical postings. At most two per company and two per title stem
 fixes that deterministically, and it is unit tested.
 
-**One adaptive branch, not a free-running loop.** If the first round of
-queries yields fewer than 15 unique jobs, the planner sees what it tried and
-the counts, and proposes three different queries. That is the agentic moment
-worth having; an open-ended loop would cost more and be harder to make
-reliable.
+**Agency where it is bounded.** The fixed planner has one adaptive branch: if
+the first round yields fewer than 15 unique jobs, it sees what it tried and
+proposes three different queries. The `--agentic` planner is a real tool loop,
+but with hard caps on searches and turns and a forced, validated submission
+at the end. Neither mode lets the model decide what the next pipeline stage
+is; that stays in code.
 
 **Rejected:** WhatsApp delivery (Twilio template approval for no demo value),
 a web UI, scheduling and a feedback loop (real product features, out of scope

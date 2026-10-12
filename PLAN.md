@@ -190,3 +190,8 @@ paragraph saying this.
   gap 3.0, fewest tokens); v2 calibration rules did not help; gpt-oss-120b is
   the weakest ranker. Defaults changed accordingly. 20b hit the 200K
   tokens-per-day cap before v2 could be measured on it.
+- Added `--agentic` planning (tool loop with search_jobs / submit_plan,
+  capped at 8 searches). Measured on a real CV: 8 searches, 18K tokens vs
+  1.4K for the fixed planner; reasons cite search evidence. Groq rejects a
+  request outright if a forced tool_choice is violated, so the forced turn
+  removes the search tool instead of only forcing the choice.

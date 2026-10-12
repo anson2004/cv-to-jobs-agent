@@ -22,6 +22,7 @@ from ..trace import Tracer
 from .explain import explain
 from .extract import extract_profile
 from .fetch import fetch_jobs
+from .agentic_plan import agentic_plan
 from .plan import plan_more, plan_queries
 from .prefilter import rank_pool
 from .score import score_jobs
@@ -46,6 +47,7 @@ def run_pipeline(
     score_model: str | None = None,
     dry_run: bool = False,
     skip_sent: bool = True,
+    agentic: bool = False,
 ) -> RunSummary:
     s = settings
     run_id = new_run_id()
@@ -64,8 +66,15 @@ def run_pipeline(
     profile = extract_profile(llm, text, s.model_strong)
     console.print(f"[green]profile[/] {profile.name}: {profile.headline} ({profile.seniority.value}, {profile.years_experience}y, {len(profile.skills)} skills)")
 
-    # 2. profile -> queries
-    plan = plan_queries(llm, profile, s.model_strong)
+    # 2. profile -> queries (fixed single call, or the agent drives the search itself)
+    if agentic:
+        ar = agentic_plan(llm, profile, s.model_strong, s.cache_dir, offline)
+        plan = ar.plan
+        console.print(f"[green]agentic plan[/] {len(ar.searches)} searches over {ar.turns} turns" + ("  [yellow](forced submit)[/]" if ar.forced_submit else ""))
+        for q, n in ar.searches:
+            console.print(f"  [dim]searched[/] '{q}' -> {n} matches")
+    else:
+        plan = plan_queries(llm, profile, s.model_strong)
     for q in plan.queries:
         console.print(f"  [cyan]{'lateral ' if q.lateral else '        '}[/]'{q.query}'  — {q.reason}")
 
