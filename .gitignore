@@ -1,0 +1,12 @@
+.env
+*.key
+*key*.txt
+__pycache__/
+.venv/
+data/cache/
+data/jobad.sqlite
+data/out/
+data/eval/candidates.jsonl
+data/eval/profile.json
+.pytest_cache/
+cv_example

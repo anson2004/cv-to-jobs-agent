@@ -1,0 +1,47 @@
+{
+ "prompt_version": "v2",
+ "model": "qwen/qwen3.8-27b",
+ "n_labelled": 34,
+ "n_scored": 34,
+ "k": 4,
+ "precision_at_k": 0.75,
+ "bad_in_top_k": 0,
+ "recall_at_k": 0.6,
+ "mean_overall_by_label": {
+  "good": 3.15,
+  "ok": 1.42,
+  "bad": 0.66
+ },
+ "separation": 2.49,
+ "top_k": [
+  {
+   "job_id": "arbeitnow:remote-applied-ai-engineer-404690",
+   "overall": 4.6,
+   "label": "good"
+  },
+  {
+   "job_id": "arbeitnow:senior-software-engineer-ai-automation-hybrid-117253",
+   "overall": 4.3,
+   "label": "ok"
+  },
+  {
+   "job_id": "arbeitnow:remote-full-stack-engineer-backend-leaning-creative-agents-142992",
+   "overall": 3.85,
+   "label": "good"
+  },
+  {
+   "job_id": "arbeitnow:remote-senior-software-engineer-backend-distributed-systems-417843",
+   "overall": 3.8,
+   "label": "good"
+  }
+ ],
+ "usage": {
+  "calls": 34,
+  "failures": 0,
+  "prompt_tokens": 41321,
+  "completion_tokens": 7457,
+  "latency_s": 845.08,
+  "est_cost_usd": 0.01274
+ },
+ "trace": "/Users/yiqingliang/Desktop/testRepo/job-ad-orchestrator/data/traces/eval-v2-qwen3.8-27b-124407.jsonl"
+}

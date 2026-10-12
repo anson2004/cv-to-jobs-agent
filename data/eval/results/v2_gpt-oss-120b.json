@@ -1,0 +1,47 @@
+{
+ "prompt_version": "v2",
+ "model": "openai/gpt-oss-120b",
+ "n_labelled": 34,
+ "n_scored": 34,
+ "k": 4,
+ "precision_at_k": 0.5,
+ "bad_in_top_k": 0,
+ "recall_at_k": 0.4,
+ "mean_overall_by_label": {
+  "good": 3.77,
+  "ok": 3.49,
+  "bad": 1.8
+ },
+ "separation": 1.97,
+ "top_k": [
+  {
+   "job_id": "arbeitnow:remote-applied-ai-engineer-404690",
+   "overall": 5.0,
+   "label": "good"
+  },
+  {
+   "job_id": "arbeitnow:java-backend-entwickler-berlin-218967",
+   "overall": 5.0,
+   "label": "ok"
+  },
+  {
+   "job_id": "arbeitnow:remote-full-stack-engineer-backend-leaning-creative-agents-142992",
+   "overall": 4.6,
+   "label": "good"
+  },
+  {
+   "job_id": "arbeitnow:senior-software-engineer-ai-automation-hybrid-117253",
+   "overall": 4.6,
+   "label": "ok"
+  }
+ ],
+ "usage": {
+  "calls": 34,
+  "failures": 0,
+  "prompt_tokens": 42893,
+  "completion_tokens": 13184,
+  "latency_s": 622.61,
+  "est_cost_usd": 0.01435
+ },
+ "trace": "/Users/yiqingliang/Desktop/testRepo/job-ad-orchestrator/data/traces/eval-v2-gpt-oss-120b-151644.jsonl"
+}
