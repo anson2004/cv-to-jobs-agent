@@ -1,0 +1,19 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # No API key in CI, and the LLM endpoint points nowhere: any test that
+      # accidentally calls a model fails fast instead of spending tokens.
+      LLM_BASE_URL: http://127.0.0.1:9/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run pytest -q
