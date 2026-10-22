@@ -1,0 +1,33 @@
+# Local LLM for the pipeline: Ollama, OpenAI-compatible at http://localhost:11434/v1.
+#
+#   docker compose up -d ollama        # start the server
+#   docker compose run --rm pull       # download $OLLAMA_MODEL once (default qwen3:8b)
+#
+# Then point the app at it (see .env.example, "local LLM"). Models live in
+# data/ollama so they survive restarts and can be cached in CI.
+# On macOS Docker has no GPU access, so this runs on CPU: fine for small runs.
+
+services:
+  ollama:
+    image: ollama/ollama:0.35.1
+    ports: ["11434:11434"]
+    volumes:
+      - ./data/ollama:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m  # keep the model loaded between pipeline steps
+      OLLAMA_CONTEXT_LENGTH: 8192  # default 4096 is too short for the agentic planner's growing transcript
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  pull:
+    image: ollama/ollama:0.35.1
+    profiles: ["tools"]  # only runs when called explicitly
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen3:8b}"]

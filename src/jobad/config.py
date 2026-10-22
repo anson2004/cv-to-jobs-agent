@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     llm_api_key: str = Field("ollama", validation_alias=AliasChoices("LLM_API_KEY", "GROQ_API_KEY"))
     model_strong: str = "openai/gpt-oss-120b"
     model_fast: str = "qwen/qwen3.8-27b"  # chosen by eval, see README
+    # Force one reasoning effort on every JSON call, e.g. "none" for small local models
+    # on CPU, where thinking eats the token budget. Empty = each step's own default.
+    # The agentic tool loop keeps its own effort: small models need it to call tools.
+    reasoning_effort: str = ""
+    llm_timeout_s: float = Field(90, gt=0)  # per request; raise for CPU-only local models
 
     # Groq free tier per model (checked 2026-10-12): 8K tokens/min, 1K requests/day,
     # and 200K tokens/day. A 40-job run is ~70K tokens, so about two full runs plus

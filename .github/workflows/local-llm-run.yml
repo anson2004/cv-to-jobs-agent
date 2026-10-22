@@ -1,0 +1,60 @@
+name: local-llm-run
+
+# One pipeline run on a local model (Ollama in Docker, CPU only), started by hand.
+# Fetches live from the public job boards, writes the email to disk (dry run)
+# and uploads it with the trace. No API keys, no tokens spent anywhere.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Ollama model for every step
+        default: qwen3:8b
+      max_jobs:
+        description: Jobs to score (each is one call, ~1 min on CPU)
+        default: "5"
+      location:
+        description: Location filter, e.g. Tampere (empty = none)
+        default: ""
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OLLAMA_MODEL: ${{ inputs.model }}
+      LLM_BASE_URL: http://localhost:11434/v1
+      LLM_API_KEY: ollama
+      MODEL_STRONG: ${{ inputs.model }}
+      MODEL_FAST: ${{ inputs.model }}
+      REASONING_EFFORT: none  # thinking on CPU eats the token budget
+      LLM_TIMEOUT_S: "600"
+      SCORE_CONCURRENCY: "1"
+      LOCATION: ${{ inputs.location }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+
+      - name: Restore model
+        uses: actions/cache@v4
+        with:
+          path: data/ollama
+          key: ollama-0.35.1-${{ inputs.model }}
+
+      - run: docker compose up -d --wait ollama
+      - run: docker compose run --rm pull  # quick no-op when the cache hit
+
+      - run: uv run jobad run --dry-run --max-jobs ${{ inputs.max_jobs }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-output
+          path: |
+            data/out/
+            data/traces/
+
+      - name: Let the cache step read the model files (written by root in the container)
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" data/ollama

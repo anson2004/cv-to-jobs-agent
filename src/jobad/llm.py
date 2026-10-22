@@ -73,8 +73,8 @@ class LLM:
     def __init__(self, settings: Settings, tracer: Tracer):
         self.s = settings
         self.tracer = tracer
-        self.client = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key, max_retries=4, timeout=90)
-        self.aclient = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key, max_retries=4, timeout=90)
+        self.client = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key, max_retries=4, timeout=settings.llm_timeout_s)
+        self.aclient = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key, max_retries=4, timeout=settings.llm_timeout_s)
         self._pause_until = 0.0  # shared across concurrent scoring workers
 
     # ---- sync -----------------------------------------------------------
@@ -176,17 +176,19 @@ class LLM:
                     raise
                 return await self.aclient.chat.completions.create(**self._params(model, messages, max_tokens * 2, "low", json_mode=False))
 
-    @staticmethod
-    def _params(model: str, messages: Messages, max_tokens: int, reasoning_effort: str, *, json_mode: bool) -> _CreateParams:
+    def _params(self, model: str, messages: Messages, max_tokens: int, reasoning_effort: str, *, json_mode: bool) -> _CreateParams:
         """Provider quirks live here and nowhere else.
 
         Groq: gpt-oss takes reasoning_effort low/medium/high; Qwen3 takes "none" or
         "default" and would otherwise stream its chain of thought into `content`.
         reasoning_format="hidden" keeps reasoning out of the content on both.
+        Ollama: Qwen3 takes "none" or low/medium/high, and rejects "default".
         """
+        reasoning_effort = self.s.reasoning_effort or reasoning_effort
         extra: dict[str, str] = {"reasoning_format": "hidden"}
         if "qwen" in model.lower():
-            extra["reasoning_effort"] = "none" if reasoning_effort == "low" else "default"
+            on_groq = "groq.com" in self.s.llm_base_url
+            extra["reasoning_effort"] = "none" if reasoning_effort == "low" else ("default" if on_groq else reasoning_effort)
         else:
             extra["reasoning_effort"] = reasoning_effort
         p: _CreateParams = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2, "extra_body": extra}

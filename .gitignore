@@ -11,3 +11,4 @@ data/eval/profile.json
 .pytest_cache/
 cv_example
 data/traces
+data/ollama/
