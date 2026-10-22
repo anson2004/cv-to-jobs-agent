@@ -20,7 +20,7 @@ class FetchResult:
     jobs: list[Job]
     fetched: int
     per_query: dict[str, int] = field(default_factory=dict)
-    hits: Counter = field(default_factory=Counter)
+    hits: Counter[str] = field(default_factory=Counter)
 
 
 def _dedup(jobs: list[Job]) -> list[Job]:
@@ -42,7 +42,7 @@ def fetch_jobs(queries: list[SearchQuery], cache_dir: Path, offline: bool, sourc
     srcs = sources if sources is not None else build_sources(cache_dir, offline)
     raw: list[Job] = []
     per_query: dict[str, int] = {}
-    hits: Counter = Counter()
+    hits: Counter[str] = Counter()
     for q in queries:
         n = 0
         for s in srcs:

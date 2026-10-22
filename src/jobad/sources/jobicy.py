@@ -7,13 +7,34 @@ the query's first keyword as the tag, then the full query is applied locally.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
+from pydantic import BaseModel
 
 from ..schemas import Job
 from ..textutil import strip_html
-from .base import JobSource, matches_query, query_terms
+from .base import JobSource, JsonDict, NoneAsEmpty, Str, StrList, matches_query, query_terms
+
+
+class JobicyItem(BaseModel):
+    """Field names follow the API's camelCase."""
+
+    id: int | str
+    jobTitle: Str = ""
+    companyName: Str = ""
+    jobGeo: Str = ""
+    url: Str = ""
+    jobDescription: Str = ""
+    jobExcerpt: Str = ""
+    jobIndustry: StrList = []
+    jobType: StrList = []
+    jobLevel: Str = ""
+    pubDate: Str = ""
+
+
+class JobicyResponse(BaseModel):
+    jobs: Annotated[list[JobicyItem], NoneAsEmpty] = []
 
 
 class JobicySource(JobSource):
@@ -21,7 +42,7 @@ class JobicySource(JobSource):
     kind = "search"
     URL = "https://jobicy.com/api/v2/remote-jobs"
 
-    def _request(self, client: httpx.Client, query: str) -> Any:
+    def _request(self, client: httpx.Client, query: str) -> JsonDict:
         """Try each query term as the tag; Jobicy 400s on tags it does not know
         (e.g. 'ai'). Fall back to the untagged feed, which the local filter then narrows."""
         for tag in [*query_terms(query), None]:
@@ -32,28 +53,28 @@ class JobicySource(JobSource):
             if r.status_code == 400 and tag:
                 continue
             r.raise_for_status()
-            return r.json()
+            body: JsonDict = r.json()
+            return body
         return {"jobs": []}
 
     def search(self, query: str) -> list[Job]:
         return [j for j in super().search(query) if matches_query(j, query)]
 
-    def _parse(self, raw: Any) -> list[Job]:
+    def _parse(self, raw: JsonDict) -> list[Job]:
         out: list[Job] = []
-        for j in raw.get("jobs", []) or []:
-            geo = j.get("jobGeo") or "Anywhere"
+        for j in JobicyResponse.model_validate(raw).jobs:
             out.append(
                 Job(
-                    id=f"jobicy:{j['id']}",
+                    id=f"jobicy:{j.id}",
                     source=self.name,
-                    title=(j.get("jobTitle") or "").strip(),
-                    company=(j.get("companyName") or "").strip(),
-                    location=f"Remote ({geo})",
+                    title=j.jobTitle.strip(),
+                    company=j.companyName.strip(),
+                    location=f"Remote ({j.jobGeo or 'Anywhere'})",
                     remote=True,
-                    url=j.get("url", ""),
-                    description=strip_html(j.get("jobDescription") or j.get("jobExcerpt") or ""),
-                    tags=list(j.get("jobIndustry") or []) + list(j.get("jobType") or []) + ([j["jobLevel"]] if j.get("jobLevel") else []),
-                    posted_at=(j.get("pubDate") or "")[:10] or None,
+                    url=j.url,
+                    description=strip_html(j.jobDescription or j.jobExcerpt),
+                    tags=j.jobIndustry + j.jobType + ([j.jobLevel] if j.jobLevel else []),
+                    posted_at=j.pubDate[:10] or None,
                     salary=None,
                 )
             )

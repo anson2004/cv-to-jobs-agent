@@ -37,8 +37,8 @@ def select_top(jobs: list[Job], scores: list[JobScore], k: int, location: str | 
         return (round(s.overall + (LOCAL_BONUS if local else 0.0), 2), local)  # equal scores: local first
 
     ranked = sorted((s for s in scores if s.job_id in by_id), key=rank_key, reverse=True)
-    companies: Counter = Counter()
-    stems: Counter = Counter()
+    companies: Counter[str] = Counter()
+    stems: Counter[str] = Counter()
     out: list[tuple[Job, JobScore]] = []
     for s in ranked:
         j = by_id[s.job_id]

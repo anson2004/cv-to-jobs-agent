@@ -11,6 +11,9 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel
 
 from .config import Settings
 from .cv import cv_to_text
@@ -19,9 +22,42 @@ from .pipeline.extract import extract_profile
 from .pipeline.score import score_jobs
 from .schemas import CandidateProfile, Job
 from .store import Store
-from .trace import Tracer
+from .trace import Tracer, Usage
 
-LABEL_ORDER = {"good": 2, "ok": 1, "bad": 0}
+Label = Literal["good", "ok", "bad"]
+LABEL_ORDER: dict[Label, int] = {"good": 2, "ok": 1, "bad": 0}
+
+
+class EvalLabel(BaseModel):
+    """One line of labels.jsonl."""
+
+    job_id: str
+    label: Label
+    note: str = ""
+
+
+class RankedJob(BaseModel):
+    job_id: str
+    overall: float
+    label: Label
+
+
+class EvalResult(BaseModel):
+    """Saved to data/eval/results/<prompt>_<model>.json."""
+
+    prompt_version: str
+    model: str
+    n_labelled: int
+    n_scored: int
+    k: int
+    precision_at_k: float
+    bad_in_top_k: int
+    recall_at_k: float
+    mean_overall_by_label: dict[Label, float | None]
+    separation: float
+    top_k: list[RankedJob]
+    usage: Usage
+    trace: str
 
 
 def export_candidates(settings: Settings, out: Path, limit: int = 60) -> int:
@@ -35,10 +71,10 @@ def export_candidates(settings: Settings, out: Path, limit: int = 60) -> int:
     return len(jobs)
 
 
-def load_labels(path: Path) -> dict[str, dict]:
+def load_labels(path: Path) -> dict[str, EvalLabel]:
     with path.open() as f:
-        rows = [json.loads(l) for l in f if l.strip()]
-    return {r["job_id"]: r for r in rows}
+        rows = [EvalLabel.model_validate_json(l) for l in f if l.strip()]
+    return {r.job_id: r for r in rows}
 
 
 def _profile(settings: Settings, llm: LLM, cv_path: Path, cache: Path) -> CandidateProfile:
@@ -49,7 +85,7 @@ def _profile(settings: Settings, llm: LLM, cv_path: Path, cache: Path) -> Candid
     return p
 
 
-def run_eval(settings: Settings, cv_path: Path, labels_path: Path, *, prompt_version: str, model: str, k: int = 4) -> dict:
+def run_eval(settings: Settings, cv_path: Path, labels_path: Path, *, prompt_version: str, model: str, k: int = 4) -> EvalResult:
     labels = load_labels(labels_path)
     store = Store(settings.db_path)
     jobs: list[Job] = [j for jid in labels if (j := store.get_job(jid)) is not None]
@@ -67,34 +103,34 @@ def run_eval(settings: Settings, cv_path: Path, labels_path: Path, *, prompt_ver
     ranked = sorted(scores, key=lambda s: s.overall, reverse=True)
     topk = ranked[:k]
 
-    def mean(xs):
+    def mean(xs: list[float]) -> float | None:
         return round(sum(xs) / len(xs), 2) if xs else None
 
-    per_label = {lab: mean([by_id[j].overall for j in labels if j in by_id and labels[j]["label"] == lab]) for lab in LABEL_ORDER}
-    n_good = sum(1 for lab in labels.values() if lab["label"] == "good")
-    result = {
-        "prompt_version": prompt_version,
-        "model": model,
-        "n_labelled": len(labels),
-        "n_scored": len(scores),
-        "k": k,
-        "precision_at_k": round(sum(1 for s in topk if labels[s.job_id]["label"] == "good") / k, 2),
-        "bad_in_top_k": sum(1 for s in topk if labels[s.job_id]["label"] == "bad"),
-        "recall_at_k": round(sum(1 for s in topk if labels[s.job_id]["label"] == "good") / max(n_good, 1), 2),
-        "mean_overall_by_label": per_label,
-        "separation": round((per_label["good"] or 0) - (per_label["bad"] or 0), 2),
-        "top_k": [{"job_id": s.job_id, "overall": s.overall, "label": labels[s.job_id]["label"]} for s in topk],
-        "usage": tracer.summarize(tracer.records)["total"],
-        "trace": str(tracer.path),
-    }
+    per_label = {lab: mean([by_id[j].overall for j in labels if j in by_id and labels[j].label == lab]) for lab in LABEL_ORDER}
+    n_good = sum(1 for lab in labels.values() if lab.label == "good")
+    result = EvalResult(
+        prompt_version=prompt_version,
+        model=model,
+        n_labelled=len(labels),
+        n_scored=len(scores),
+        k=k,
+        precision_at_k=round(sum(1 for s in topk if labels[s.job_id].label == "good") / k, 2),
+        bad_in_top_k=sum(1 for s in topk if labels[s.job_id].label == "bad"),
+        recall_at_k=round(sum(1 for s in topk if labels[s.job_id].label == "good") / max(n_good, 1), 2),
+        mean_overall_by_label=per_label,
+        separation=round((per_label["good"] or 0) - (per_label["bad"] or 0), 2),
+        top_k=[RankedJob(job_id=s.job_id, overall=s.overall, label=labels[s.job_id].label) for s in topk],
+        usage=tracer.summarize(tracer.records).total,
+        trace=str(tracer.path),
+    )
     results_dir = labels_path.parent / "results"
     results_dir.mkdir(exist_ok=True)
-    (results_dir / f"{prompt_version}_{model.split('/')[-1]}.json").write_text(json.dumps(result, indent=1))
+    (results_dir / f"{prompt_version}_{model.split('/')[-1]}.json").write_text(result.model_dump_json(indent=1))
     return result
 
 
-def load_results(labels_path: Path) -> list[dict]:
+def load_results(labels_path: Path) -> list[EvalResult]:
     d = labels_path.parent / "results"
     if not d.exists():
         return []
-    return [json.loads(p.read_text()) for p in sorted(d.glob("*.json"))]
+    return [EvalResult.model_validate_json(p.read_text()) for p in sorted(d.glob("*.json"))]

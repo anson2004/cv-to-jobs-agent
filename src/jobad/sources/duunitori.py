@@ -18,18 +18,33 @@ from __future__ import annotations
 import re
 import time
 from datetime import datetime
-from typing import Any
+from pathlib import Path
+from typing import Annotated, Any
 
 import httpx
+from pydantic import BaseModel
 
 from ..schemas import Job
 from ..textutil import strip_html
-from .base import JobSource, query_terms
+from .base import JobSource, JsonDict, NoneAsEmpty, Str, query_terms
 
 SWEEP_TERMS = ["software", "developer", "engineer", "ohjelmisto", "data", "cloud", "devops", "python", "java", "backend", "tekoäly", "ai"]
 MAX_PAGES = 3
 PAUSE_S = 1.0
 _REMOTE = re.compile(r"\b(etätyö|etänä|remote|hybridi|hybrid)\b", re.I)
+
+
+class DuunitoriItem(BaseModel):
+    slug: str
+    heading: Str = ""
+    company_name: Str = ""
+    municipality_name: Str = ""
+    date_posted: Str = ""
+    descr: Str = ""
+
+
+class DuunitoriFeed(BaseModel):
+    results: Annotated[list[DuunitoriItem], NoneAsEmpty] = []
 
 
 class DuunitoriSource(JobSource):
@@ -38,8 +53,8 @@ class DuunitoriSource(JobSource):
     URL = "https://duunitori.fi/api/v1/jobentries"
     area: str | None = None  # set by the pipeline from the location filter, e.g. "Tampere"
 
-    def _request(self, client: httpx.Client, query: str) -> Any:
-        results: dict[str, dict] = {}
+    def _request(self, client: httpx.Client, query: str) -> JsonDict:
+        results: dict[str, JsonDict] = {}
         for term in SWEEP_TERMS:
             for page in range(1, MAX_PAGES + 1):
                 params: dict[str, Any] = {"search": term, "page": page}
@@ -48,7 +63,7 @@ class DuunitoriSource(JobSource):
                 r = client.get(self.URL, params=params)
                 if r.status_code != 200:
                     break
-                body = r.json()
+                body: JsonDict = r.json()
                 for it in body.get("results", []):
                     results.setdefault(it["slug"], it)
                 time.sleep(PAUSE_S)
@@ -56,7 +71,7 @@ class DuunitoriSource(JobSource):
                     break
         return {"results": list(results.values()), "area": self.area}
 
-    def _key(self, query: str):
+    def _key(self, query: str) -> Path:
         return super()._key(f"{query}|{self.area or 'all'}")
 
     def search(self, query: str) -> list[Job]:
@@ -65,32 +80,32 @@ class DuunitoriSource(JobSource):
         terms = query_terms(query)
         if not terms:
             return list(self._feed)
-        out = []
+        out: list[Job] = []
         for j in self._feed:
             hay = f"{j.title}\n{j.description}".lower()
             if any(t in hay for t in terms):
                 out.append(j)
         return out
 
-    def _parse(self, raw: Any) -> list[Job]:
+    def _parse(self, raw: JsonDict) -> list[Job]:
         out: list[Job] = []
-        for j in raw.get("results", []) or []:
-            heading = (j.get("heading") or "").strip()
-            descr = strip_html(j.get("descr") or "")
-            posted = (j.get("date_posted") or "")[:10] or None
+        for j in DuunitoriFeed.model_validate(raw).results:
+            heading = j.heading.strip()
+            descr = strip_html(j.descr)
+            posted = j.date_posted[:10] or None
             try:
                 datetime.fromisoformat(posted) if posted else None
             except ValueError:
                 posted = None
             out.append(
                 Job(
-                    id=f"duunitori:{j['slug']}",
+                    id=f"duunitori:{j.slug}",
                     source=self.name,
                     title=heading,
-                    company=(j.get("company_name") or "").strip(),
-                    location=f"{j.get('municipality_name') or 'Finland'}, Finland",
+                    company=j.company_name.strip(),
+                    location=f"{j.municipality_name or 'Finland'}, Finland",
                     remote=bool(_REMOTE.search(heading) or _REMOTE.search(descr[:600])),
-                    url=f"https://duunitori.fi/tyopaikat/tyo/{j['slug']}",
+                    url=f"https://duunitori.fi/tyopaikat/tyo/{j.slug}",
                     description=descr,
                     tags=[],
                     posted_at=posted,

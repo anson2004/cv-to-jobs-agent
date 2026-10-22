@@ -6,11 +6,17 @@ Usage: uv run python scripts/make_cv.py
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypedDict
 
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
-NX = dict(new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+class _Next(TypedDict):
+    new_x: XPos
+    new_y: YPos
+
+
+NX: _Next = {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "data" / "cv" / "sample_cv.md"

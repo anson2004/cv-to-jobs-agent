@@ -16,7 +16,7 @@ from ..config import Settings
 from ..cv import cv_to_text
 from ..deliver.email import deliver
 from ..llm import LLM
-from ..schemas import QueryPlan, Recommendation, RunSummary
+from ..schemas import QueryPlan, Recommendation, RunStats, RunSummary
 from ..sources import build_sources
 from ..store import Store
 from ..trace import Tracer
@@ -77,8 +77,8 @@ def run_pipeline(
         ar = agentic_plan(llm, profile, s.model_strong, s.cache_dir, offline, sources=sources)
         plan = ar.plan
         console.print(f"[green]agentic plan[/] {len(ar.searches)} searches over {ar.turns} turns" + ("  [yellow](forced submit)[/]" if ar.forced_submit else ""))
-        for q, n in ar.searches:
-            console.print(f"  [dim]searched[/] '{q}' -> {n} matches")
+        for query, n in ar.searches:
+            console.print(f"  [dim]searched[/] '{query}' -> {n} matches")
     else:
         plan = plan_queries(llm, profile, s.model_strong)
     for q in plan.queries:
@@ -145,7 +145,7 @@ def run_pipeline(
         run_id=run_id, profile=profile, plan=plan, fetched=fr.fetched, deduped=len(fr.jobs), scored=len(scores),
         top=[(j, sc, r) for (j, sc), r in zip(picks, recs)], delivered_to=delivered_to,
     )
-    store.finish_run(run_id, profile, {"fetched": fr.fetched, "deduped": len(fr.jobs), "scored": len(scores), "top": [j.id for j, _ in picks], "delivered_to": delivered_to})
-    t = tracer.summarize(tracer.records)["total"]
-    console.print(f"[dim]llm calls {t['calls']}  tokens {t['prompt_tokens']}+{t['completion_tokens']}  est. cost ${t['est_cost_usd']:.4f}  trace data/traces/{run_id}.jsonl[/]")
+    store.finish_run(run_id, profile, RunStats(fetched=fr.fetched, deduped=len(fr.jobs), scored=len(scores), top=[j.id for j, _ in picks], delivered_to=delivered_to))
+    t = tracer.summarize(tracer.records).total
+    console.print(f"[dim]llm calls {t.calls}  tokens {t.prompt_tokens}+{t.completion_tokens}  est. cost ${t.est_cost_usd:.4f}  trace data/traces/{run_id}.jsonl[/]")
     return summary

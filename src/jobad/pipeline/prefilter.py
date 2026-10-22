@@ -14,6 +14,7 @@ are deliberately adjacent; skills count in the title and (capped) in the body.
 from __future__ import annotations
 
 import re
+from collections.abc import Set as AbstractSet
 
 from ..schemas import CandidateProfile, Job, SearchQuery
 
@@ -48,7 +49,7 @@ def location_terms(profile: CandidateProfile) -> set[str]:
     return terms
 
 
-def lexical_prior(job: Job, skills: set[str], core: set[str], lateral: set[str], locs: set[str] = frozenset(), *, local_first: bool = False) -> float:
+def lexical_prior(job: Job, skills: set[str], core: set[str], lateral: set[str], locs: AbstractSet[str] = frozenset(), *, local_first: bool = False) -> float:
     title = _tokens(job.title)
     tags = _tokens(" ".join(job.tags))
     desc = _tokens(job.description[:12000])

@@ -19,17 +19,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from openai import BadRequestError
+from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletionFunctionToolParam
+from pydantic import BaseModel, ValidationError
 
-from ..llm import LLM
+from ..llm import LLM, Messages
 from ..prompts import load_prompt
-from ..schemas import CandidateProfile, QueryPlan, SearchQuery
+from ..schemas import CandidateProfile, Job, QueryPlan, SearchQuery
 from ..sources import ALL_SOURCES, JobSource, build_sources
 
 MAX_SEARCHES = 8
 MAX_TURNS = 10
 SAMPLE_TITLES = 8
 
-TOOLS = [
+TOOLS: list[ChatCompletionFunctionToolParam] = [
     {
         "type": "function",
         "function": {
@@ -77,23 +79,45 @@ TOOLS = [
 SUBMIT_ONLY = [t for t in TOOLS if t["function"]["name"] == "submit_plan"]
 
 
+class SearchArgs(BaseModel):
+    """Arguments of a search_jobs call. submit_plan arguments validate as QueryPlan."""
+
+    query: str = ""
+
+
+class SearchResult(BaseModel):
+    """What search_jobs returns to the model."""
+
+    query: str
+    matches: int
+    sample: list[str] | None = None
+    error: str | None = None
+
+    def to_tool_content(self) -> str:
+        return json.dumps(self.model_dump(exclude_none=True))
+
+
 @dataclass
 class AgenticResult:
-    plan: QueryPlan | None = None
+    plan: QueryPlan
     searches: list[tuple[str, int]] = field(default_factory=list)  # (query, matches)
     turns: int = 0
     forced_submit: bool = False
 
 
-def _search_tool(sources: list[JobSource], query: str) -> str:
-    jobs = []
+def _tool_error(message: str) -> str:
+    return json.dumps({"error": message})
+
+
+def _search_tool(sources: list[JobSource], query: str) -> SearchResult:
+    jobs: list[Job] = []
     for s in sources:
         try:
             jobs.extend(s.search(query))
         except Exception as e:  # a dead source is reported to the model, not fatal
-            jobs_err = f"{s.name} failed: {str(e)[:80]}"
-            return json.dumps({"query": query, "matches": 0, "error": jobs_err})
-    seen, sample = set(), []
+            return SearchResult(query=query, matches=0, error=f"{s.name} failed: {str(e)[:80]}")
+    seen: set[tuple[str, str]] = set()
+    sample: list[str] = []
     for j in jobs:
         k = (j.title.lower(), j.company.lower())
         if k in seen:
@@ -102,7 +126,7 @@ def _search_tool(sources: list[JobSource], query: str) -> str:
         sample.append(f"{j.title} — {j.company} ({j.location or 'n/a'}{', remote' if j.remote else ''})")
         if len(sample) == SAMPLE_TITLES:
             break
-    return json.dumps({"query": query, "matches": len(jobs), "sample": sample})
+    return SearchResult(query=query, matches=len(jobs), sample=sample)
 
 
 def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Path, offline: bool = False, sources: list[JobSource] | None = None) -> AgenticResult:
@@ -113,15 +137,14 @@ def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Pat
         f"Broaden queries that return few results; narrow ones that return mostly unrelated roles. Use at most {MAX_SEARCHES} searches, "
         "then call submit_plan with the 4-8 queries that actually surfaced relevant postings. Do not submit a query you did not try."
     )
-    messages: list[dict] = [
+    messages: Messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": f"Candidate profile:\n{profile.model_dump_json(indent=1)}\n\nStart searching."},
     ]
-    result = AgenticResult()
+    searches: list[tuple[str, int]] = []  # (query, matches)
     searches_left = MAX_SEARCHES
 
     for turn in range(1, MAX_TURNS + 1):
-        result.turns = turn
         force = searches_left <= 0 or turn == MAX_TURNS
         if force:
             # Take the search tool away rather than only forcing tool_choice: Groq
@@ -141,42 +164,44 @@ def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Pat
                 raise
             # The model emitted a call that did not validate. One more try, submit-only, no forcing.
             msg = llm.chat_with_tools(step="plan_agentic", model=model, messages=messages, tools=SUBMIT_ONLY, tool_choice="auto", meta={"turn": turn, "recovery": True})
-        messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [tc.model_dump() for tc in (msg.tool_calls or [])]} if msg.tool_calls else {"role": "assistant", "content": msg.content or ""})
+        calls = [tc for tc in (msg.tool_calls or []) if tc.type == "function"]
+        assistant: ChatCompletionAssistantMessageParam = {"role": "assistant", "content": msg.content or ""}
+        if calls:
+            assistant["tool_calls"] = [{"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in calls]
+        messages.append(assistant)
 
-        if not msg.tool_calls:
+        if not calls:
             # The model talked instead of acting. Nudge once; the turn cap bounds this.
             messages.append({"role": "user", "content": "Use the tools: search_jobs to explore, submit_plan to finish."})
             continue
 
-        for tc in msg.tool_calls:
+        for tc in calls:
             name = tc.function.name
-            try:
-                args = json.loads(tc.function.arguments or "{}")
-            except json.JSONDecodeError:
-                args = {}
+            arguments = tc.function.arguments or "{}"
             if name == "search_jobs":
-                q = str(args.get("query", "")).strip()
+                try:
+                    q = SearchArgs.model_validate_json(arguments).query.strip()
+                except ValidationError:
+                    q = ""
                 if searches_left <= 0 or not q:
-                    out = json.dumps({"error": "search budget exhausted; call submit_plan"})
+                    out = _tool_error("search budget exhausted; call submit_plan")
                 else:
                     searches_left -= 1
-                    out = _search_tool(sources, q)
-                    result.searches.append((q, json.loads(out).get("matches", 0)))
+                    found = _search_tool(sources, q)
+                    searches.append((q, found.matches))
+                    out = found.to_tool_content()
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": out})
             elif name == "submit_plan":
                 try:
-                    plan = QueryPlan(queries=[SearchQuery(**q) for q in args.get("queries", [])])
-                except Exception as e:
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps({"error": f"invalid plan: {str(e)[:200]}"})})
+                    plan = QueryPlan.model_validate_json(arguments)
+                except ValidationError as e:
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": _tool_error(f"invalid plan: {str(e)[:200]}")})
                     continue
-                result.plan = plan
-                result.forced_submit = force
-                return result
+                return AgenticResult(plan=plan, searches=searches, turns=turn, forced_submit=force)
             else:
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps({"error": f"unknown tool {name}"})})
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": _tool_error(f"unknown tool {name}")})
 
     # Turn cap hit without a valid submission: fall back to the queries it searched.
-    tried = [q for q, n in result.searches if n > 0] or [q for q, _ in result.searches]
-    result.plan = QueryPlan(queries=[SearchQuery(query=q, reason="searched by the agent; submit_plan never completed") for q in tried[:8]] or [SearchQuery(query=profile.headline[:40], reason="fallback")])
-    result.forced_submit = True
-    return result
+    tried = [q for q, n in searches if n > 0] or [q for q, _ in searches]
+    plan = QueryPlan(queries=[SearchQuery(query=q, reason="searched by the agent; submit_plan never completed") for q in tried[:8]] or [SearchQuery(query=profile.headline[:40], reason="fallback")])
+    return AgenticResult(plan=plan, searches=searches, turns=MAX_TURNS, forced_submit=True)

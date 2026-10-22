@@ -102,3 +102,13 @@ class RunSummary(BaseModel):
     scored: int
     top: list[tuple[Job, JobScore, Recommendation]]
     delivered_to: str
+
+
+class RunStats(BaseModel):
+    """What `runs.summary_json` holds in the store."""
+
+    fetched: int
+    deduped: int
+    scored: int
+    top: list[str]
+    delivered_to: str

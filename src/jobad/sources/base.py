@@ -15,16 +15,37 @@ pipeline can run offline and a demo never depends on a third-party API being up.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
+from pydantic import BaseModel, BeforeValidator
 
 from ..schemas import Job
+
+JsonDict = dict[str, Any]
+
+
+def _str_list(v: Any) -> Any:
+    if v is None:
+        return []
+    return [v] if isinstance(v, str) else v
+
+
+# Job boards send null, omit a field, or send a bare string where a list is
+# expected. The raw-response models read all of these as empty / one item.
+Str = Annotated[str, BeforeValidator(lambda v: "" if v is None else v)]
+StrList = Annotated[list[str], BeforeValidator(_str_list)]
+NoneAsEmpty = BeforeValidator(lambda v: [] if v is None else v)
+
+
+class CacheEntry(BaseModel):
+    query: str
+    fetched_at: float
+    body: JsonDict
 
 _QUERY_STOP = {"engineer", "developer", "engineering", "senior", "junior", "remote", "jobs", "job", "role", "roles"}
 _WORD = re.compile(r"[a-z0-9+#.\-]+")
@@ -56,12 +77,12 @@ class JobSource(ABC):
 
     # -- subclass contract ---------------------------------------------
     @abstractmethod
-    def _request(self, client: httpx.Client, query: str) -> Any:
+    def _request(self, client: httpx.Client, query: str) -> JsonDict:
         """Hit the API and return the parsed JSON body. For feed sources `query` is ignored."""
 
     @abstractmethod
-    def _parse(self, raw: Any) -> list[Job]:
-        """Map the raw body to Job objects."""
+    def _parse(self, raw: JsonDict) -> list[Job]:
+        """Validate the raw body against the source's response model and map it to Job objects."""
 
     # -- public --------------------------------------------------------
     def search(self, query: str) -> list[Job]:
@@ -72,7 +93,7 @@ class JobSource(ABC):
         return self._parse(self._fetch(query))
 
     # -- fetch + cache -------------------------------------------------
-    def _fetch(self, query: str) -> Any:
+    def _fetch(self, query: str) -> JsonDict:
         raw = self._cached(query)
         if raw is None:
             if self.offline:
@@ -82,18 +103,18 @@ class JobSource(ABC):
             self._write_cache(query, raw)
         return raw
 
-    def _empty(self) -> Any:
+    def _empty(self) -> JsonDict:
         return {}
 
     def _key(self, query: str) -> Path:
         h = hashlib.sha1(query.strip().lower().encode()).hexdigest()[:16]
         return self.cache_dir / f"{h}.json"
 
-    def _cached(self, query: str) -> Any | None:
+    def _cached(self, query: str) -> JsonDict | None:
         p = self._key(query)
         if not p.exists():
             return None
-        return json.loads(p.read_text())["body"]
+        return CacheEntry.model_validate_json(p.read_text()).body
 
-    def _write_cache(self, query: str, body: Any) -> None:
-        self._key(query).write_text(json.dumps({"query": query, "fetched_at": time.time(), "body": body}))
+    def _write_cache(self, query: str, body: JsonDict) -> None:
+        self._key(query).write_text(CacheEntry(query=query, fetched_at=time.time(), body=body).model_dump_json())

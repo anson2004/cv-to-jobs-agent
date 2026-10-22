@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .arbeitnow import ArbeitnowSource
 from .base import JobSource, matches_query, query_terms
 from .duunitori import DuunitoriSource
@@ -8,7 +10,7 @@ from .remotive import RemotiveSource
 ALL_SOURCES: list[type[JobSource]] = [JobicySource, RemotiveSource, ArbeitnowSource]
 
 
-def build_sources(cache_dir, offline: bool = False, *, duunitori: bool = False, area: str | None = None) -> list[JobSource]:
+def build_sources(cache_dir: Path, offline: bool = False, *, duunitori: bool = False, area: str | None = None) -> list[JobSource]:
     """Instantiate the sources for a run. Duunitori only when explicitly enabled."""
     srcs: list[JobSource] = [S(cache_dir, offline=offline) for S in ALL_SOURCES]
     if duunitori:

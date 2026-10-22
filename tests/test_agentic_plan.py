@@ -20,7 +20,7 @@ class FakeSource:
 
 
 def _call(name, args, cid):
-    return SimpleNamespace(id=cid, function=SimpleNamespace(name=name, arguments=json.dumps(args)), model_dump=lambda: {"id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}})
+    return SimpleNamespace(id=cid, type="function", function=SimpleNamespace(name=name, arguments=json.dumps(args)))
 
 
 class FakeLLM:

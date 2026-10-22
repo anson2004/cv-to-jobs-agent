@@ -1,46 +1,45 @@
-"""Settings from environment. One place, no magic."""
+"""Settings from environment and .env, validated by pydantic-settings. One place, no magic.
+
+Field names map to upper-case env vars (llm_base_url <- LLM_BASE_URL). Empty
+values count as unset, so a blank line in .env falls back to the default.
+"""
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT / ".env")
 
 
-def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default)
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=ROOT / ".env", env_ignore_empty=True, extra="ignore")
 
-
-@dataclass
-class Settings:
     # LLM backend (OpenAI-compatible). Groq by default; Ollama or OpenAI by env.
-    llm_base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL", "https://api.groq.com/openai/v1"))
-    llm_api_key: str = field(default_factory=lambda: _env("LLM_API_KEY") or _env("GROQ_API_KEY") or "ollama")
-    model_strong: str = field(default_factory=lambda: _env("MODEL_STRONG", "openai/gpt-oss-120b"))
-    model_fast: str = field(default_factory=lambda: _env("MODEL_FAST", "qwen/qwen3.8-27b"))  # chosen by eval, see README
+    llm_base_url: str = "https://api.groq.com/openai/v1"
+    llm_api_key: str = Field("ollama", validation_alias=AliasChoices("LLM_API_KEY", "GROQ_API_KEY"))
+    model_strong: str = "openai/gpt-oss-120b"
+    model_fast: str = "qwen/qwen3.8-27b"  # chosen by eval, see README
 
     # Groq free tier per model (checked 2026-10-12): 8K tokens/min, 1K requests/day,
     # and 200K tokens/day. A 40-job run is ~70K tokens, so about two full runs plus
     # one eval per model per day. Spread work across models or wait for the window.
-    score_concurrency: int = field(default_factory=lambda: int(_env("SCORE_CONCURRENCY", "2")))
-    max_jobs_to_score: int = field(default_factory=lambda: int(_env("MAX_JOBS_TO_SCORE", "40")))
-    description_chars: int = field(default_factory=lambda: int(_env("DESCRIPTION_CHARS", "1800")))
-    top_k: int = 4
+    score_concurrency: int = Field(2, ge=1)
+    max_jobs_to_score: int = Field(40, ge=1)
+    description_chars: int = Field(1800, ge=100)
+    top_k: int = Field(4, ge=1)
 
     # Location filter (e.g. "Tampere"); empty = no filter. Also selects Duunitori's area.
-    location: str = field(default_factory=lambda: _env("LOCATION"))
+    location: str = ""
     # Duunitori is opt-in: undocumented endpoint, robots.txt disallows bots. Personal use only.
-    duunitori_enabled: bool = field(default_factory=lambda: _env("DUUNITORI_ENABLED", "false").lower() in ("1", "true", "yes"))
+    duunitori_enabled: bool = False
 
     # Delivery
-    resend_api_key: str = field(default_factory=lambda: _env("RESEND_API_KEY"))
-    to_email: str = field(default_factory=lambda: _env("TO_EMAIL"))
-    from_email: str = field(default_factory=lambda: _env("FROM_EMAIL", "Job Ad Orchestrator <onboarding@resend.dev>"))
+    resend_api_key: str = ""
+    to_email: str = ""
+    from_email: str = "Job Ad Orchestrator <onboarding@resend.dev>"
 
     # Paths
     data_dir: Path = ROOT / "data"

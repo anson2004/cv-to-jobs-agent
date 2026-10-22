@@ -22,7 +22,7 @@ def render(run_id: str, profile: CandidateProfile, picks: list[tuple[Job, JobSco
     return tpl.render(run_id=run_id, profile=profile, items=items)
 
 
-def deliver(settings: Settings, run_id: str, profile: CandidateProfile, picks, recs, *, dry_run: bool = False) -> str:
+def deliver(settings: Settings, run_id: str, profile: CandidateProfile, picks: list[tuple[Job, JobScore]], recs: list[Recommendation], *, dry_run: bool = False) -> str:
     html = render(run_id, profile, picks, recs)
     settings.out_dir.mkdir(parents=True, exist_ok=True)
     out = settings.out_dir / f"{run_id}.html"

@@ -5,12 +5,11 @@ The 'sent' table is what stops a rerun from recommending the same job twice.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from pathlib import Path
 
-from .schemas import CandidateProfile, Job, JobScore
+from .schemas import CandidateProfile, Job, JobScore, RunStats
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -39,10 +38,10 @@ class Store:
         self.conn.execute("INSERT OR REPLACE INTO runs(run_id, started_at, status) VALUES (?,?,?)", (run_id, time.time(), "started"))
         self.conn.commit()
 
-    def finish_run(self, run_id: str, profile: CandidateProfile, summary: dict) -> None:
+    def finish_run(self, run_id: str, profile: CandidateProfile, stats: RunStats) -> None:
         self.conn.execute(
             "UPDATE runs SET status=?, profile_json=?, summary_json=? WHERE run_id=?",
-            ("done", profile.model_dump_json(), json.dumps(summary, default=str), run_id),
+            ("done", profile.model_dump_json(), stats.model_dump_json(), run_id),
         )
         self.conn.commit()
 

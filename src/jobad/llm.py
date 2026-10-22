@@ -10,22 +10,43 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import TypeVar
+from collections.abc import Sequence
+from typing import Any, Required, TypedDict, TypeVar
 
 from openai import AsyncOpenAI, BadRequestError, OpenAI, RateLimitError
+from openai.types.chat import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    ChatCompletionMessageParam,
+    ChatCompletionToolChoiceOptionParam,
+    ChatCompletionToolUnionParam,
+)
+from openai.types.shared_params import ResponseFormatJSONObject
 from pydantic import BaseModel, ValidationError
 
 from .config import Settings
 from .trace import Tracer
 
 T = TypeVar("T", bound=BaseModel)
+Messages = list[ChatCompletionMessageParam]
+
+
+class _CreateParams(TypedDict, total=False):
+    """Keyword arguments for chat.completions.create, as built by `LLM._params`."""
+
+    model: Required[str]
+    messages: Required[Messages]
+    max_tokens: Required[int]
+    temperature: Required[float]
+    extra_body: Required[dict[str, str]]
+    response_format: ResponseFormatJSONObject
 
 
 def _schema_hint(schema: type[BaseModel]) -> str:
     """JSON schema with descriptions stripped. The prompts explain the fields;
     repeating descriptions here costs ~300 tokens per call on the N-times path."""
 
-    def strip(node):
+    def strip(node: Any) -> Any:
         if isinstance(node, dict):
             return {k: strip(v) for k, v in node.items() if k not in ("description", "title")}
         if isinstance(node, list):
@@ -52,9 +73,8 @@ class LLM:
     def __init__(self, settings: Settings, tracer: Tracer):
         self.s = settings
         self.tracer = tracer
-        kw = dict(base_url=settings.llm_base_url, api_key=settings.llm_api_key, max_retries=4, timeout=90)
-        self.client = OpenAI(**kw)
-        self.aclient = AsyncOpenAI(**kw)
+        self.client = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key, max_retries=4, timeout=90)
+        self.aclient = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key, max_retries=4, timeout=90)
         self._pause_until = 0.0  # shared across concurrent scoring workers
 
     # ---- sync -----------------------------------------------------------
@@ -69,7 +89,7 @@ class LLM:
         reasoning_effort: str = "low",
         max_tokens: int = 1500,
         fix_attempts: int = 1,
-        meta: dict | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> T:
         messages = self._messages(schema, system, user)
         last_err: Exception | None = None
@@ -93,10 +113,7 @@ class LLM:
             except (ValidationError, ValueError, json.JSONDecodeError) as e:
                 last_err = e
                 self._trace(step, model, resp, t0, False, attempt, text[:2000], str(e)[:500], meta)
-                messages = messages + [
-                    {"role": "assistant", "content": text},
-                    {"role": "user", "content": f"That JSON failed validation:\n{e}\nReturn corrected JSON only."},
-                ]
+                messages = messages + self._fix_request(text, e)
         raise RuntimeError(f"{step}: no valid output after {fix_attempts + 1} attempts: {last_err}")
 
     # ---- async (used for scoring under a semaphore) --------------------
@@ -111,7 +128,7 @@ class LLM:
         reasoning_effort: str = "low",
         max_tokens: int = 800,
         fix_attempts: int = 1,
-        meta: dict | None = None,
+        meta: dict[str, Any] | None = None,
         sem: asyncio.Semaphore | None = None,
     ) -> T:
         messages = self._messages(schema, system, user)
@@ -128,13 +145,10 @@ class LLM:
             except (ValidationError, ValueError, json.JSONDecodeError) as e:
                 last_err = e
                 self._trace(step, model, resp, t0, False, attempt, text[:2000], str(e)[:500], meta)
-                messages = messages + [
-                    {"role": "assistant", "content": text},
-                    {"role": "user", "content": f"That JSON failed validation:\n{e}\nReturn corrected JSON only."},
-                ]
+                messages = messages + self._fix_request(text, e)
         raise RuntimeError(f"{step}: no valid output after {fix_attempts + 1} attempts: {last_err}")
 
-    async def _acreate_with_backoff(self, model, messages, max_tokens, reasoning_effort, give_up_after_s: float = 900.0):
+    async def _acreate_with_backoff(self, model: str, messages: Messages, max_tokens: int, reasoning_effort: str, give_up_after_s: float = 900.0) -> ChatCompletion:
         """Groq free tier is 8K tokens/min per model. On 429 every worker must
         pause together, for as long as the `retry-after` header says, otherwise
         each worker burns its own retries during the same burst and the batch
@@ -163,19 +177,19 @@ class LLM:
                 return await self.aclient.chat.completions.create(**self._params(model, messages, max_tokens * 2, "low", json_mode=False))
 
     @staticmethod
-    def _params(model: str, messages: list[dict], max_tokens: int, reasoning_effort: str, *, json_mode: bool) -> dict:
+    def _params(model: str, messages: Messages, max_tokens: int, reasoning_effort: str, *, json_mode: bool) -> _CreateParams:
         """Provider quirks live here and nowhere else.
 
         Groq: gpt-oss takes reasoning_effort low/medium/high; Qwen3 takes "none" or
         "default" and would otherwise stream its chain of thought into `content`.
         reasoning_format="hidden" keeps reasoning out of the content on both.
         """
-        extra: dict = {"reasoning_format": "hidden"}
+        extra: dict[str, str] = {"reasoning_format": "hidden"}
         if "qwen" in model.lower():
             extra["reasoning_effort"] = "none" if reasoning_effort == "low" else "default"
         else:
             extra["reasoning_effort"] = reasoning_effort
-        p = dict(model=model, messages=messages, max_tokens=max_tokens, temperature=0.2, extra_body=extra)
+        p: _CreateParams = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2, "extra_body": extra}
         if json_mode:
             p["response_format"] = {"type": "json_object"}
         return p
@@ -186,13 +200,13 @@ class LLM:
         *,
         step: str,
         model: str,
-        messages: list[dict],
-        tools: list[dict],
-        tool_choice: str | dict = "auto",
+        messages: Messages,
+        tools: Sequence[ChatCompletionToolUnionParam],
+        tool_choice: ChatCompletionToolChoiceOptionParam = "auto",
         reasoning_effort: str = "medium",
         max_tokens: int = 1500,
-        meta: dict | None = None,
-    ):
+        meta: dict[str, Any] | None = None,
+    ) -> ChatCompletionMessage:
         """One assistant turn that may contain tool calls. Returns the message
         object; the caller executes tools and appends results. Traced like any call."""
         t0 = time.time()
@@ -206,13 +220,13 @@ class LLM:
             extra_body={"reasoning_effort": reasoning_effort, "reasoning_format": "hidden"},
         )
         msg = resp.choices[0].message
-        calls = [{"name": tc.function.name, "arguments": tc.function.arguments[:300]} for tc in (msg.tool_calls or [])]
+        calls = [{"name": tc.function.name, "arguments": tc.function.arguments[:300]} for tc in (msg.tool_calls or []) if tc.type == "function"]
         self._trace(step, model, resp, t0, True, 1, {"tool_calls": calls, "content": (msg.content or "")[:500]}, None, meta)
         return msg
 
     # ---- helpers --------------------------------------------------------
     @staticmethod
-    def _messages(schema: type[BaseModel], system: str, user: str) -> list[dict]:
+    def _messages(schema: type[BaseModel], system: str, user: str) -> Messages:
         sys_full = (
             f"{system.strip()}\n\n"
             "Respond with a single JSON object and nothing else. It must validate against this JSON Schema:\n"
@@ -220,13 +234,20 @@ class LLM:
         )
         return [{"role": "system", "content": sys_full}, {"role": "user", "content": user}]
 
-    def _trace(self, step, model, resp, t0, ok, attempt, output, error, meta):
+    @staticmethod
+    def _fix_request(text: str, err: Exception) -> Messages:
+        return [
+            {"role": "assistant", "content": text},
+            {"role": "user", "content": f"That JSON failed validation:\n{err}\nReturn corrected JSON only."},
+        ]
+
+    def _trace(self, step: str, model: str, resp: ChatCompletion, t0: float, ok: bool, attempt: int, output: Any, error: str | None, meta: dict[str, Any] | None) -> None:
         usage = resp.usage
         self.tracer.record(
             step=step,
             model=model,
-            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
             latency_s=time.time() - t0,
             ok=ok,
             attempt=attempt,
