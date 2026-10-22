@@ -7,7 +7,9 @@ name: local-llm-run
 #   Resend (needs RESEND_API_KEY and TO_EMAIL secrets), remembers sent jobs
 #   between runs, and keeps CV details out of the public logs, artifacts and cache.
 # - not set: uses the sample CV, dry run, uploads the email and trace as artifacts.
-# Optional repository variable LOCATION (e.g. Tampere) sets the location filter.
+# Optional repository variables: LOCATION (e.g. Tampere) sets the location filter;
+# DUUNITORI_ENABLED=true adds Finland's main job board, the only source with
+# Finnish on-site jobs (opt-in: its robots.txt disallows bots, see README).
 
 on:
   schedule:
@@ -19,7 +21,7 @@ on:
         default: qwen3:8b
       max_jobs:
         description: Jobs to score (each is one call, ~1 min on CPU)
-        default: "5"
+        default: "15"
       location:
         description: Location filter, e.g. Tampere (empty = repository variable LOCATION)
         default: ""
@@ -30,14 +32,15 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       # Scheduled runs have no inputs, hence the fallbacks.
       OLLAMA_MODEL: ${{ inputs.model || 'qwen3:8b' }}
       MODEL_STRONG: ${{ inputs.model || 'qwen3:8b' }}
       MODEL_FAST: ${{ inputs.model || 'qwen3:8b' }}
-      MAX_JOBS: ${{ inputs.max_jobs || '5' }}
+      MAX_JOBS: ${{ inputs.max_jobs || '15' }}
       LOCATION: ${{ inputs.location || vars.LOCATION }}
+      DUUNITORI_ENABLED: ${{ vars.DUUNITORI_ENABLED }}  # empty = off
       LLM_BASE_URL: http://localhost:11434/v1
       LLM_API_KEY: ollama
       REASONING_EFFORT: none  # thinking on CPU eats the token budget
