@@ -1,10 +1,17 @@
 name: local-llm-run
 
-# One pipeline run on a local model (Ollama in Docker, CPU only), started by hand.
-# Fetches live from the public job boards, writes the email to disk (dry run)
-# and uploads it with the trace. No API keys, no tokens spent anywhere.
+# Twice-weekly pipeline run on a local model (Ollama in Docker, CPU only). No LLM API keys.
+#
+# Two modes, picked by whether the CV_URL secret is set:
+# - CV_URL set (a direct-download link to your CV): emails the picks through
+#   Resend (needs RESEND_API_KEY and TO_EMAIL secrets), remembers sent jobs
+#   between runs, and keeps CV details out of the public logs, artifacts and cache.
+# - not set: uses the sample CV, dry run, uploads the email and trace as artifacts.
+# Optional repository variable LOCATION (e.g. Tampere) sets the location filter.
 
 on:
+  schedule:
+    - cron: "0 5 * * 1,4"  # Mon + Thu 05:00 UTC; caches expire after 7 days unused
   workflow_dispatch:
     inputs:
       model:
@@ -14,24 +21,40 @@ on:
         description: Jobs to score (each is one call, ~1 min on CPU)
         default: "5"
       location:
-        description: Location filter, e.g. Tampere (empty = none)
+        description: Location filter, e.g. Tampere (empty = repository variable LOCATION)
         default: ""
+
+permissions:
+  contents: read
 
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      OLLAMA_MODEL: ${{ inputs.model }}
+      # Scheduled runs have no inputs, hence the fallbacks.
+      OLLAMA_MODEL: ${{ inputs.model || 'qwen3:8b' }}
+      MODEL_STRONG: ${{ inputs.model || 'qwen3:8b' }}
+      MODEL_FAST: ${{ inputs.model || 'qwen3:8b' }}
+      MAX_JOBS: ${{ inputs.max_jobs || '5' }}
+      LOCATION: ${{ inputs.location || vars.LOCATION }}
       LLM_BASE_URL: http://localhost:11434/v1
       LLM_API_KEY: ollama
-      MODEL_STRONG: ${{ inputs.model }}
-      MODEL_FAST: ${{ inputs.model }}
       REASONING_EFFORT: none  # thinking on CPU eats the token budget
       LLM_TIMEOUT_S: "600"
       SCORE_CONCURRENCY: "1"
-      LOCATION: ${{ inputs.location }}
+      PRIVATE_CV: ${{ secrets.CV_URL != '' }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      TO_EMAIL: ${{ secrets.TO_EMAIL }}
     steps:
+      - name: Check email secrets (your CV mode)
+        if: env.PRIVATE_CV == 'true'
+        run: |
+          if [ -z "$RESEND_API_KEY" ] || [ -z "$TO_EMAIL" ]; then
+            echo "::error::CV_URL is set, so results are emailed, not uploaded. Add the RESEND_API_KEY and TO_EMAIL secrets."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked
@@ -40,20 +63,55 @@ jobs:
         uses: actions/cache@v4
         with:
           path: data/ollama
-          key: ollama-0.35.1-${{ inputs.model }}
+          key: ollama-0.35.1-${{ env.OLLAMA_MODEL }}
 
       - run: docker compose up -d --wait ollama
       - run: docker compose run --rm pull  # quick no-op when the cache hit
 
-      - run: uv run jobad run --dry-run --max-jobs ${{ inputs.max_jobs }}
+      # ---- sample CV: dry run, outputs are public artifacts ------------------
+      - name: Run (sample CV)
+        if: env.PRIVATE_CV != 'true'
+        run: uv run jobad run --dry-run --max-jobs "$MAX_JOBS"
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && env.PRIVATE_CV != 'true'
         with:
           name: run-output
           path: |
             data/out/
             data/traces/
+
+      # ---- your CV: email only, nothing about the CV in logs/artifacts/cache --
+      - name: Restore sent-jobs memory
+        if: env.PRIVATE_CV == 'true'
+        uses: actions/cache@v4
+        with:
+          path: data/jobad.sqlite
+          key: jobad-db-${{ github.run_id }}
+          restore-keys: jobad-db-
+
+      - name: Download CV
+        if: env.PRIVATE_CV == 'true'
+        env:
+          CV_URL: ${{ secrets.CV_URL }}
+        run: curl -fsSL "${CV_URL/dl=0/dl=1}" -o "$RUNNER_TEMP/cv.pdf"
+
+      - name: Run (your CV, output hidden)
+        if: env.PRIVATE_CV == 'true'
+        run: |
+          if uv run jobad run "$RUNNER_TEMP/cv.pdf" --max-jobs "$MAX_JOBS" > "$RUNNER_TEMP/run.log" 2>&1; then
+            grep "^llm calls" "$RUNNER_TEMP/run.log" || true
+          else
+            echo "::error::Run failed. Output is hidden because it contains CV details; reproduce locally."
+            exit 1
+          fi
+
+      - name: Keep only sent job ids in the cached database
+        if: always() && env.PRIVATE_CV == 'true'
+        run: |
+          if [ -f data/jobad.sqlite ]; then
+            sqlite3 data/jobad.sqlite "UPDATE runs SET profile_json = NULL, summary_json = NULL; DELETE FROM scores; VACUUM;"
+          fi
 
       - name: Let the cache step read the model files (written by root in the container)
         if: always()
