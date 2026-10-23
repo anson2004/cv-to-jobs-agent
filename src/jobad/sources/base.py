@@ -48,7 +48,7 @@ class CacheEntry(BaseModel):
     body: JsonDict
 
 _QUERY_STOP = {"engineer", "developer", "engineering", "senior", "junior", "remote", "jobs", "job", "role", "roles"}
-_WORD = re.compile(r"[a-z0-9+#.\-]+")
+_WORD = re.compile(r"[a-z0-9+#.\-äöå]+")  # äöå: Finnish queries for Duunitori
 
 
 def query_terms(query: str) -> list[str]:

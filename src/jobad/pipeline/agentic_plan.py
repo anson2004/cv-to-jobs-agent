@@ -129,30 +129,48 @@ def _search_tool(sources: list[JobSource], query: str) -> SearchResult:
     return SearchResult(query=query, matches=len(jobs), sample=sample)
 
 
-def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Path, offline: bool = False, sources: list[JobSource] | None = None) -> AgenticResult:
-    sources = sources if sources is not None else [S(cache_dir, offline=offline) for S in ALL_SOURCES]
-    system = (
-        load_prompt("plan_queries")
-        + "\n\nYou have a search_jobs tool. Use it: try a query, look at the matches and sample titles, then refine. "
-        f"Broaden queries that return few results; narrow ones that return mostly unrelated roles. Use at most {MAX_SEARCHES} searches, "
+def tool_instructions(max_searches: int) -> str:
+    return (
+        "\n\nYou have a search_jobs tool. Use it: try a query, look at the matches and sample titles, then refine. "
+        f"Broaden queries that return few results; narrow ones that return mostly unrelated roles. Use at most {max_searches} searches, "
         "then call submit_plan with the 4-8 queries that actually surfaced relevant postings. Do not submit a query you did not try."
     )
+
+
+def agentic_plan(
+    llm: LLM,
+    profile: CandidateProfile,
+    model: str,
+    cache_dir: Path,
+    offline: bool = False,
+    sources: list[JobSource] | None = None,
+    *,
+    prompt: str = "plan_queries",
+    context: str = "",
+    max_searches: int | None = None,
+    max_turns: int | None = None,
+    step: str = "plan_agentic",
+) -> AgenticResult:
+    """`prompt`, `context` and the budgets let the team planner run this loop as a worker."""
+    sources = sources if sources is not None else [S(cache_dir, offline=offline) for S in ALL_SOURCES]
+    max_searches = max_searches or MAX_SEARCHES
+    max_turns = max_turns or MAX_TURNS
     messages: Messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"Candidate profile:\n{profile.model_dump_json(indent=1)}\n\nStart searching."},
+        {"role": "system", "content": load_prompt(prompt) + tool_instructions(max_searches)},
+        {"role": "user", "content": f"Candidate profile:\n{profile.model_dump_json(indent=1)}\n\n{context}Start searching."},
     ]
     searches: list[tuple[str, int]] = []  # (query, matches)
-    searches_left = MAX_SEARCHES
+    searches_left = max_searches
 
-    for turn in range(1, MAX_TURNS + 1):
-        force = searches_left <= 0 or turn == MAX_TURNS
+    for turn in range(1, max_turns + 1):
+        force = searches_left <= 0 or turn == max_turns
         if force:
             # Take the search tool away rather than only forcing tool_choice: Groq
             # rejects the whole request if the model still tries to search.
             messages.append({"role": "user", "content": "Search budget exhausted. Call submit_plan now with the queries that returned relevant postings."})
         try:
             msg = llm.chat_with_tools(
-                step="plan_agentic",
+                step=step,
                 model=model,
                 messages=messages,
                 tools=SUBMIT_ONLY if force else TOOLS,
@@ -163,7 +181,7 @@ def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Pat
             if "tool_use_failed" not in str(e):
                 raise
             # The model emitted a call that did not validate. One more try, submit-only, no forcing.
-            msg = llm.chat_with_tools(step="plan_agentic", model=model, messages=messages, tools=SUBMIT_ONLY, tool_choice="auto", meta={"turn": turn, "recovery": True})
+            msg = llm.chat_with_tools(step=step, model=model, messages=messages, tools=SUBMIT_ONLY, tool_choice="auto", meta={"turn": turn, "recovery": True})
         calls = [tc for tc in (msg.tool_calls or []) if tc.type == "function"]
         assistant: ChatCompletionAssistantMessageParam = {"role": "assistant", "content": msg.content or ""}
         if calls:
@@ -204,4 +222,4 @@ def agentic_plan(llm: LLM, profile: CandidateProfile, model: str, cache_dir: Pat
     # Turn cap hit without a valid submission: fall back to the queries it searched.
     tried = [q for q, n in searches if n > 0] or [q for q, _ in searches]
     plan = QueryPlan(queries=[SearchQuery(query=q, reason="searched by the agent; submit_plan never completed") for q in tried[:8]] or [SearchQuery(query=profile.headline[:40], reason="fallback")])
-    return AgenticResult(plan=plan, searches=searches, turns=MAX_TURNS, forced_submit=True)
+    return AgenticResult(plan=plan, searches=searches, turns=max_turns, forced_submit=True)

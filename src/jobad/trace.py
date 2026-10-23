@@ -6,6 +6,7 @@ validated output (or the error). This is what `jobad trace <run_id>` reads.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from .config import LIST_PRICES
+
+_lock = threading.Lock()
 
 
 def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
@@ -97,9 +100,10 @@ class Tracer:
             error=error,
             meta=meta or {},
         )
-        self.records.append(rec)
-        with self.path.open("a") as f:
-            f.write(rec.model_dump_json(fallback=str) + "\n")
+        with _lock:  # search workers run in threads
+            self.records.append(rec)
+            with self.path.open("a") as f:
+                f.write(rec.model_dump_json(fallback=str) + "\n")
 
     @staticmethod
     def load(path: Path) -> list[TraceRecord]:

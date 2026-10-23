@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
+from pydantic.json_schema import SkipJsonSchema
 
 
 class Seniority(str, Enum):
@@ -38,6 +39,8 @@ class SearchQuery(BaseModel):
     query: str = Field(description="Short keyword query, 2-5 words, as typed into a job board")
     reason: str = Field(description="Why this query for this candidate")
     lateral: bool = Field(default=False, description="True if this is an adjacent role the candidate may not have considered")
+    # Set by code, never by the model: which sources this query runs against (None = all).
+    sources: SkipJsonSchema[list[str] | None] = None
 
 
 class QueryPlan(BaseModel):
@@ -92,6 +95,12 @@ class Recommendation(BaseModel):
 
 class RecommendationSet(BaseModel):
     recommendations: list[Recommendation]
+
+
+class SearchBrief(BaseModel):
+    target_roles: list[str] = Field(min_length=2, max_length=5, description="Role titles to look for, most important first")
+    avoid: list[str] = Field(default=[], description="Kinds of roles to stay away from")
+    notes: str = Field(description="One or two sentences on what makes a posting a fit for this candidate")
 
 
 class ClaimCheck(BaseModel):

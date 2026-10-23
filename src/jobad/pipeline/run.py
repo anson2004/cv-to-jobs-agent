@@ -25,6 +25,7 @@ from .extract import extract_profile
 from .fetch import fetch_jobs
 from .locate import filter_by_location
 from .agentic_plan import agentic_plan
+from .team_plan import team_plan
 from .plan import plan_more, plan_queries
 from .prefilter import rank_pool
 from .score import score_jobs
@@ -51,6 +52,7 @@ def run_pipeline(
     dry_run: bool = False,
     skip_sent: bool = True,
     agentic: bool = False,
+    team: bool = False,
     location: str | None = None,
     verify: bool = True,
 ) -> RunSummary:
@@ -74,8 +76,14 @@ def run_pipeline(
     profile = extract_profile(llm, text, s.model_strong)
     console.print(f"[green]profile[/] {profile.name}: {profile.headline} ({profile.seniority.value}, {profile.years_experience}y, {len(profile.skills)} skills)")
 
-    # 2. profile -> queries (fixed single call, or the agent drives the search itself)
-    if agentic:
+    # 2. profile -> queries (fixed single call, a team of search agents, or one agent)
+    if team:
+        tr = team_plan(llm, profile, s.model_strong, s.cache_dir, sources)
+        plan = tr.plan
+        console.print(f"[green]team plan[/] brief: {', '.join(tr.brief.target_roles)}")
+        for w in tr.workers:
+            console.print(f"  [green]{w.team}[/] {len(w.searches)} searches, {len(w.queries)} queries" + ("  [yellow](fallback: one call)[/]" if w.fallback else ""))
+    elif agentic:
         ar = agentic_plan(llm, profile, s.model_strong, s.cache_dir, offline, sources=sources)
         plan = ar.plan
         console.print(f"[green]agentic plan[/] {len(ar.searches)} searches over {ar.turns} turns" + ("  [yellow](forced submit)[/]" if ar.forced_submit else ""))
@@ -92,7 +100,7 @@ def run_pipeline(
     if len(fr.jobs) < MIN_POOL:
         more = plan_more(llm, profile, fr.per_query, s.model_strong)
         console.print(f"[yellow]thin pool[/] planner added {len(more.queries)} queries: " + ", ".join(f"'{q.query}'" for q in more.queries))
-        plan = QueryPlan(queries=plan.queries + more.queries)
+        plan = QueryPlan.model_construct(queries=plan.queries + more.queries)  # merged, may exceed the model's 10
         fr = fetch_jobs(plan.queries, s.cache_dir, offline, sources=sources)
         console.print(f"[green]fetch[/] {fr.fetched} raw -> {len(fr.jobs)} after dedup")
     store.upsert_jobs(run_id, fr.jobs)

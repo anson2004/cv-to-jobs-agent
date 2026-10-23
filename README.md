@@ -33,6 +33,7 @@ Useful options:
 | `--location Tampere` | Keep jobs in that place, or remote jobs open to it; on-site jobs ranked a bit higher |
 | `--offline` | Read job sources from the local cache only |
 | `--no-verify` | Skip the fact-check of the email notes |
+| `--team` | Plan with a coordinator and one search agent per group of boards (see below) |
 | `--agentic` | Let the model search and refine queries in a tool loop (~10× the tokens of the default planner) |
 
 Other commands: `jobad trace <run_id>` (tokens and cost per step),
@@ -48,6 +49,22 @@ is removed in code (see `src/jobad/pipeline/verify.py`).
 Example from a run with the sample CV: 16 claims, 3 flagged. The rewrite
 invented "Kafka experience at Freightline" (the CV has Kafka at another job)
 and kept "over 3 years of AI work" (the CV shows 18 months); both were dropped.
+
+## Search team (`--team`)
+
+A coordinator agent writes a brief (target roles, roles to avoid). Two search
+agents work from it in parallel, each on its own boards and with its own
+prompt: one searches the remote boards in English, one searches Duunitori in
+Finnish and English. Code tags each query with its agent's boards, so fetch runs
+it only there (`src/jobad/pipeline/team_plan.py`). An agent that cannot drive
+its tools falls back to a single planning call.
+
+Measured with the sample CV, `--location Tampere` and Duunitori on: the team put
+6 Tampere jobs in the 15 that get scored, the same as the default planner. The
+reason is that Duunitori is a feed: every run already sweeps all ~130 Tampere
+tech postings, so query language barely changes the pool. It stays opt-in.
+What did help was ranking Finnish titles ("ohjelmistokehittäjä") as
+engineering roles in the prefilter: 5 → 6 Tampere jobs, for every planner.
 
 ## Job sources
 

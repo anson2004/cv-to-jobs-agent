@@ -20,7 +20,9 @@ from ..schemas import CandidateProfile, Job, SearchQuery
 
 _STOP = {"and", "or", "the", "a", "an", "of", "for", "with", "in", "to", "engineer", "developer", "senior", "junior", "lead", "working", "role", "seeking", "features", "owning"}
 _ENGINEERING = {"engineer", "developer", "engineering", "software", "entwickler", "backend", "back-end"}
-_WORD = re.compile(r"[a-z0-9+#.\-]+")
+# Finnish titles are compound words ("ohjelmistokehittäjä" = software developer), so match stems inside words.
+_ENGINEERING_FI = ("kehittäjä", "ohjelmisto", "insinööri", "arkkitehti")
+_WORD = re.compile(r"[a-z0-9+#.\-äöå]+")
 
 
 def _tokens(s: str) -> set[str]:
@@ -65,7 +67,7 @@ def lexical_prior(job: Job, skills: set[str], core: set[str], lateral: set[str],
     score += 1.0 * len(tags & (skills | core))
     score += 0.5 * min(len(desc & skills), 12)  # cap so long postings don't win by volume
     score += 0.5 * min(len(desc & core), 6)
-    if not (title & _ENGINEERING):
+    if not (title & _ENGINEERING or any(stem in job.title.lower() for stem in _ENGINEERING_FI)):
         score *= 0.5  # not an engineering title: rarely a fit for an engineer
     return round(score, 2)
 

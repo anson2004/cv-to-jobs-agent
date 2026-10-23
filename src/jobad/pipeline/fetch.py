@@ -46,6 +46,8 @@ def fetch_jobs(queries: list[SearchQuery], cache_dir: Path, offline: bool, sourc
     for q in queries:
         n = 0
         for s in srcs:
+            if q.sources is not None and s.name not in q.sources:
+                continue  # routed to another source by the team planner
             try:
                 found = s.search(q.query)
             except Exception as e:  # a dead source must not kill the run
