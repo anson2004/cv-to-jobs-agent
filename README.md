@@ -6,8 +6,8 @@ One CV in, four job recommendations out, by email.
 CV (pdf) ──▶ extract profile ──▶ plan queries ──▶ fetch + dedup ──▶ prefilter ──▶ score each job
                  [LLM]              [LLM]          [code, cached]     [code]        [LLM ×N]
                                                                                        │
-            email ◀── explain top 4 ◀── select top 4 (max 2 per company) ◀── rank ◀────┘
-           [code]        [LLM]                 [code]                       [code]
+email ◀── fact-check ◀── explain top 4 ◀── select top 4 (max 2 per company) ◀── rank ◀─┘
+[code]   [LLM ×4-12]      [LLM]                [code]                     [code]
 ```
 
 Every model output is validated against a Pydantic schema and retried once on
@@ -32,10 +32,22 @@ Useful options:
 | `--max-jobs 10` | Score fewer jobs (default 40) |
 | `--location Tampere` | Keep jobs in that place, or remote jobs open to it; on-site jobs ranked a bit higher |
 | `--offline` | Read job sources from the local cache only |
+| `--no-verify` | Skip the fact-check of the email notes |
 | `--agentic` | Let the model search and refine queries in a tool loop (~10× the tokens of the default planner) |
 
 Other commands: `jobad trace <run_id>` (tokens and cost per step),
 `jobad runs`, `jobad eval run`, `jobad eval compare`.
+
+## Fact-check agent
+
+The writer agent drafts each job's notes; a checker agent marks every claim
+supported or unsupported against the CV and the posting. Unsupported claims go
+back to the writer once, the checker looks again, and anything still unsupported
+is removed in code (see `src/jobad/pipeline/verify.py`).
+
+Example from a run with the sample CV: 16 claims, 3 flagged. The rewrite
+invented "Kafka experience at Freightline" (the CV has Kafka at another job)
+and kept "over 3 years of AI work" (the CV shows 18 months); both were dropped.
 
 ## Job sources
 

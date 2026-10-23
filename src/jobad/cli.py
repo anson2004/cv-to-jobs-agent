@@ -83,11 +83,12 @@ def run(
     include_sent: bool = typer.Option(False, help="Do not filter out previously sent jobs."),
     agentic: bool = typer.Option(False, help="Agentic planning: the model searches with a tool and refines its queries."),
     location: str | None = typer.Option(None, help="Keep only jobs in this city/country or remote-open to it, e.g. 'Tampere'. Also sets Duunitori's area."),
+    verify: bool = typer.Option(True, help="Fact-check the email notes against the CV and posting, rewrite unsupported claims."),
 ) -> None:
     """Full pipeline: CV -> queries -> fetch -> score -> top-k -> explain -> email."""
     from .pipeline.run import run_pipeline
 
-    run_pipeline(cv, Settings(), offline=offline, max_jobs=max_jobs, top_k=top_k, prompt_version=prompt_version, score_model=score_model, dry_run=dry_run, skip_sent=not include_sent, agentic=agentic, location=location)
+    run_pipeline(cv, Settings(), offline=offline, max_jobs=max_jobs, top_k=top_k, prompt_version=prompt_version, score_model=score_model, dry_run=dry_run, skip_sent=not include_sent, agentic=agentic, location=location, verify=verify)
 
 
 @app.command()

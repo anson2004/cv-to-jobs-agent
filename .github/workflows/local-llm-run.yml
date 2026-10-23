@@ -103,7 +103,7 @@ jobs:
         if: env.PRIVATE_CV == 'true'
         run: |
           if uv run jobad run "$RUNNER_TEMP/cv.pdf" --max-jobs "$MAX_JOBS" > "$RUNNER_TEMP/run.log" 2>&1; then
-            grep "^llm calls" "$RUNNER_TEMP/run.log" || true
+            grep -E "^(verify|llm calls) " "$RUNNER_TEMP/run.log" || true  # counts only, no CV details
           else
             echo "::error::Run failed. Output is hidden because it contains CV details; reproduce locally."
             exit 1

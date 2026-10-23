@@ -1,7 +1,7 @@
 """The orchestrator. Straight-line pipeline with one adaptive branch.
 
 profile -> plan -> fetch -> (plan_more if thin) -> filter sent -> score ->
-select -> explain -> deliver. Each stage prints what it did.
+select -> explain -> fact-check -> deliver. Each stage prints what it did.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ from ..config import Settings
 from ..cv import cv_to_text
 from ..deliver.email import deliver
 from ..llm import LLM
-from ..schemas import QueryPlan, Recommendation, RunStats, RunSummary
+from ..schemas import QueryPlan, RunStats, RunSummary
 from ..sources import build_sources
 from ..store import Store
 from ..trace import Tracer
-from .explain import explain
+from .explain import explain, notes_only
 from .extract import extract_profile
 from .fetch import fetch_jobs
 from .locate import filter_by_location
@@ -29,6 +29,7 @@ from .plan import plan_more, plan_queries
 from .prefilter import rank_pool
 from .score import score_jobs
 from .select import select_top
+from .verify import verify as fact_check
 
 console = Console()
 MIN_POOL = 15  # below this, ask the planner for more queries
@@ -51,6 +52,7 @@ def run_pipeline(
     skip_sent: bool = True,
     agentic: bool = False,
     location: str | None = None,
+    verify: bool = True,
 ) -> RunSummary:
     s = settings
     run_id = new_run_id()
@@ -125,13 +127,18 @@ def run_pipeline(
     dealbreakers = sum(1 for x in scores if x.dealbreaker_hit)
     console.print(f"  scored {len(scores)}/{len(pool)}; {dealbreakers} dealbreaker hits; best overall {max((x.overall for x in scores), default=0):.2f}")
 
-    # 5. select + explain
+    # 5. select + explain + fact-check
     picks = select_top(pool, scores, top_k, location=location)
     try:
         recs = explain(llm, profile, picks, s.model_strong)
     except Exception as e:  # the email must still go out with the scorer's own notes
         console.print(f"[yellow]explain failed[/] ({str(e)[:100]}); falling back to scorer justifications")
-        recs = [Recommendation(job_id=j.id, one_line_pitch=sc.justification, why_you=[f"Overall fit {sc.overall:.1f}/5", f"Skill fit {sc.skill_fit}/5, growth {sc.growth}/5"], what_to_address=sc.red_flags[:3] or ["Read the full posting."]) for j, sc in picks]
+        recs = [notes_only(j, sc) for j, sc in picks]
+    else:
+        if verify and picks:
+            vr = fact_check(llm, text, picks, recs, s.model_strong)
+            recs = vr.recs
+            console.print(f"[green]verify[/] {vr.line()}")
     for (j, sc), r in zip(picks, recs):
         console.print(f"[bold]{sc.overall:.2f}[/] {j.title} @ {j.company} [{j.location}]  — {r.one_line_pitch}")
 

@@ -8,6 +8,7 @@ asked of the model.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -91,6 +92,16 @@ class Recommendation(BaseModel):
 
 class RecommendationSet(BaseModel):
     recommendations: list[Recommendation]
+
+
+class ClaimCheck(BaseModel):
+    index: int = Field(ge=0, description="Number of the claim as given")
+    verdict: Literal["supported", "unsupported"]
+    evidence: str = Field(description="Short quote that supports the claim, or what is missing")
+
+
+class ClaimReport(BaseModel):
+    checks: list[ClaimCheck]
 
 
 class RunSummary(BaseModel):
