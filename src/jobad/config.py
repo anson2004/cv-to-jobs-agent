@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     description_chars: int = Field(1800, ge=100)
     top_k: int = Field(4, ge=1)
 
-    # Location filter (e.g. "Tampere"); empty = no filter. Also selects Duunitori's area.
+    # Location filter, one place or comma-separated ("Tampere, Helsinki"); empty = no filter. Also selects Duunitori's areas.
     location: str = ""
     # Duunitori is opt-in: undocumented endpoint, robots.txt disallows bots. Personal use only.
     duunitori_enabled: bool = False

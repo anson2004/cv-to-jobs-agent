@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from jobad.sources.duunitori import DuunitoriSource
 
@@ -25,3 +26,24 @@ def test_cache_key_includes_area(tmp_path: Path):
     a, b = DuunitoriSource(tmp_path), DuunitoriSource(tmp_path)
     b.area = "Tampere"
     assert a._key("__feed__") != b._key("__feed__")
+
+
+def test_several_areas_are_swept_separately_and_merged(tmp_path: Path, monkeypatch):
+    import jobad.sources.duunitori as d
+
+    monkeypatch.setattr(d, "SWEEP_TERMS", ["python"])
+    monkeypatch.setattr(d, "PAUSE_S", 0)
+
+    class Client:
+        areas = []
+
+        def get(self, url, params):
+            self.areas.append(params.get("area"))
+            slug = "shared" if params["area"] == "Helsinki" else params["area"]
+            return SimpleNamespace(status_code=200, json=lambda: {"results": [{"slug": slug}, {"slug": "shared"}], "next": None})
+
+    src = DuunitoriSource(tmp_path)
+    src.area = "Tampere, Helsinki"
+    body = src._request(Client(), "__feed__")
+    assert Client.areas == ["Tampere", "Helsinki"]
+    assert sorted(it["slug"] for it in body["results"]) == ["Tampere", "shared"]

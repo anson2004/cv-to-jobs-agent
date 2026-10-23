@@ -83,7 +83,7 @@ def run(
     include_sent: bool = typer.Option(False, help="Do not filter out previously sent jobs."),
     agentic: bool = typer.Option(False, help="Agentic planning: the model searches with a tool and refines its queries."),
     team: bool = typer.Option(False, help="Team planning: a coordinator briefs one search agent per group of boards (Finnish agent for Duunitori)."),
-    location: str | None = typer.Option(None, help="Keep only jobs in this city/country or remote-open to it, e.g. 'Tampere'. Also sets Duunitori's area."),
+    location: str | None = typer.Option(None, help="Keep only jobs in these places or remote-open to them, e.g. 'Tampere' or 'Tampere, Helsinki'. Also sets Duunitori's areas."),
     verify: bool = typer.Option(True, help="Fact-check the email notes against the CV and posting, rewrite unsupported claims."),
 ) -> None:
     """Full pipeline: CV -> queries -> fetch -> score -> top-k -> explain -> email."""

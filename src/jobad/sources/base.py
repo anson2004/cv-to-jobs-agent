@@ -51,6 +51,11 @@ _QUERY_STOP = {"engineer", "developer", "engineering", "senior", "junior", "remo
 _WORD = re.compile(r"[a-z0-9+#.\-äöå]+")  # äöå: Finnish queries for Duunitori
 
 
+def split_places(location: str) -> list[str]:
+    """'Tampere, Helsinki' -> ['Tampere', 'Helsinki']."""
+    return [p.strip() for p in location.split(",") if p.strip()]
+
+
 def query_terms(query: str) -> list[str]:
     """'backend engineer python' -> ['backend', 'python']. Words that every posting has are dropped."""
     return [w for w in _WORD.findall(query.lower()) if w not in _QUERY_STOP and len(w) > 1]

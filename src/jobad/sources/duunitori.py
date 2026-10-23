@@ -6,6 +6,9 @@ This source is therefore off by default (DUUNITORI_ENABLED=true turns it on),
 makes a small number of requests per run with an identifying User-Agent and a
 pause between calls, and caches everything. Enable it for personal use only.
 
+`area` may list several cities ("Tampere, Helsinki"); each is swept separately
+and the results merged.
+
 The search ANDs its terms and matches titles, so multi-word planner queries
 return nothing for a mid-sized city. The source is modelled as a feed: a few
 broad tech terms are swept for the area once per run, and the planner's
@@ -26,7 +29,7 @@ from pydantic import BaseModel
 
 from ..schemas import Job
 from ..textutil import strip_html
-from .base import JobSource, JsonDict, NoneAsEmpty, Str, query_terms
+from .base import JobSource, JsonDict, NoneAsEmpty, Str, query_terms, split_places
 
 SWEEP_TERMS = ["software", "developer", "engineer", "ohjelmisto", "data", "cloud", "devops", "python", "java", "backend", "tekoäly", "ai"]
 MAX_PAGES = 3
@@ -51,24 +54,26 @@ class DuunitoriSource(JobSource):
     name = "duunitori"
     kind = "feed"
     URL = "https://duunitori.fi/api/v1/jobentries"
-    area: str | None = None  # set by the pipeline from the location filter, e.g. "Tampere"
+    area: str | None = None  # set by the pipeline from the location filter, e.g. "Tampere" or "Tampere, Helsinki"
 
     def _request(self, client: httpx.Client, query: str) -> JsonDict:
         results: dict[str, JsonDict] = {}
-        for term in SWEEP_TERMS:
-            for page in range(1, MAX_PAGES + 1):
-                params: dict[str, Any] = {"search": term, "page": page}
-                if self.area:
-                    params["area"] = self.area
-                r = client.get(self.URL, params=params)
-                if r.status_code != 200:
-                    break
-                body: JsonDict = r.json()
-                for it in body.get("results", []):
-                    results.setdefault(it["slug"], it)
-                time.sleep(PAUSE_S)
-                if not body.get("next"):
-                    break
+        areas: list[str | None] = [a for a in split_places(self.area or "")] or [None]
+        for area in areas:
+            for term in SWEEP_TERMS:
+                for page in range(1, MAX_PAGES + 1):
+                    params: dict[str, Any] = {"search": term, "page": page}
+                    if area:
+                        params["area"] = area
+                    r = client.get(self.URL, params=params)
+                    if r.status_code != 200:
+                        break
+                    body: JsonDict = r.json()
+                    for it in body.get("results", []):
+                        results.setdefault(it["slug"], it)
+                    time.sleep(PAUSE_S)
+                    if not body.get("next"):
+                        break
         return {"results": list(results.values()), "area": self.area}
 
     def _key(self, query: str) -> Path:

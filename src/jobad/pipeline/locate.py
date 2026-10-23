@@ -1,5 +1,6 @@
 """Step 5c: hard location filter. No LLM.
 
+`--location` takes one place or several, comma-separated ("Tampere, Helsinki").
 `--location Tampere` keeps a posting if its location names the wanted place
 (city or country), or it is remote and open to a region that includes it.
 A remote posting restricted to a list of countries that does not include the
@@ -10,7 +11,8 @@ from __future__ import annotations
 
 import re
 
-from ..schemas import Job
+from ..schemas import CandidateProfile, Job
+from ..sources.base import split_places
 
 _WORD = re.compile(r"[a-zäöå]+", re.I)
 
@@ -47,6 +49,12 @@ def location_ok(job: Job, location: str) -> bool:
         return True
     listed_countries = loc_words & (_EU_COUNTRIES | {"usa", "us", "canada", "uk", "india", "australia", "mexico", "brazil"})
     return bool(listed_countries & wanted)
+
+
+def with_search_places(profile: CandidateProfile, location: str) -> CandidateProfile:
+    """The places the user is searching in are acceptable by definition, whatever the CV says."""
+    places = split_places(location)
+    return profile.model_copy(update={"locations_ok": places + [p for p in profile.locations_ok if p not in places]})
 
 
 def filter_by_location(jobs: list[Job], location: str | None) -> list[Job]:

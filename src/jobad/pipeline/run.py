@@ -18,12 +18,13 @@ from ..deliver.email import deliver
 from ..llm import LLM
 from ..schemas import Job, JobScore, QueryPlan, RunStats, RunSummary
 from ..sources import build_sources
+from ..sources.base import split_places
 from ..store import Store
 from ..trace import Tracer
 from .explain import explain, notes_only
 from .extract import extract_profile
 from .fetch import fetch_jobs
-from .locate import filter_by_location
+from .locate import filter_by_location, with_search_places
 from .agentic_plan import agentic_plan
 from .team_plan import team_plan
 from .plan import plan_more, plan_queries
@@ -88,6 +89,8 @@ def run_pipeline(
     text = cv_to_text(cv_path)
     profile = extract_profile(llm, text, s.model_strong)
     console.print(f"[green]profile[/] {profile.name}: {profile.headline} ({profile.seniority.value}, {profile.years_experience}y, {len(profile.skills)} skills)")
+    if location:
+        profile = with_search_places(profile, location)
 
     # 2. profile -> queries (fixed single call, a team of search agents, or one agent)
     if team:
@@ -143,6 +146,7 @@ def run_pipeline(
             model=score_model, prompt_version=prompt_version,
             concurrency=s.score_concurrency, chars=s.description_chars,
             on_done=lambda: prog.advance(task),
+            search_places=split_places(location) if location else None,
         )
     store.save_scores(run_id, scores, prompt_version, score_model)
     dealbreakers = sum(1 for x in scores if x.dealbreaker_hit)

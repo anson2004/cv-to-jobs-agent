@@ -26,10 +26,13 @@ def _job_compact(j: Job, chars: int) -> str:
     )
 
 
-async def _score_all(llm: LLM, profile: CandidateProfile, jobs: list[Job], model: str, prompt_version: str, concurrency: int, chars: int, on_done: Callable[[], None] | None = None) -> list[JobScore]:
+async def _score_all(llm: LLM, profile: CandidateProfile, jobs: list[Job], model: str, prompt_version: str, concurrency: int, chars: int, on_done: Callable[[], None] | None = None, search_places: list[str] | None = None) -> list[JobScore]:
     system = load_prompt(f"score_job_{prompt_version}")
     sem = asyncio.Semaphore(concurrency)
     pc = _profile_compact(profile)
+    if search_places:
+        # An explicit location search overrides location limits written in the CV.
+        pc += f"\nThe candidate is searching in {', '.join(search_places)}: a job there is a full location fit and never a location dealbreaker."
 
     async def one(j: Job) -> JobScore | None:
         try:
@@ -58,5 +61,5 @@ async def _score_all(llm: LLM, profile: CandidateProfile, jobs: list[Job], model
     return [r for r in results if r is not None]
 
 
-def score_jobs(llm: LLM, profile: CandidateProfile, jobs: list[Job], *, model: str, prompt_version: str, concurrency: int, chars: int, on_done: Callable[[], None] | None = None) -> list[JobScore]:
-    return asyncio.run(_score_all(llm, profile, jobs, model, prompt_version, concurrency, chars, on_done))
+def score_jobs(llm: LLM, profile: CandidateProfile, jobs: list[Job], *, model: str, prompt_version: str, concurrency: int, chars: int, on_done: Callable[[], None] | None = None, search_places: list[str] | None = None) -> list[JobScore]:
+    return asyncio.run(_score_all(llm, profile, jobs, model, prompt_version, concurrency, chars, on_done, search_places))
