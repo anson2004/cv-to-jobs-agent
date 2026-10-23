@@ -10,6 +10,9 @@ name: local-llm-run
 # Optional repository variables: LOCATION (e.g. Tampere) sets the location filter;
 # DUUNITORI_ENABLED=true adds Finland's main job board, the only source with
 # Finnish on-site jobs (opt-in: its robots.txt disallows bots, see README).
+# Debugging your CV mode: DEBUG_LOGS=true prints the scored jobs (titles and
+# scores only) to the log, and with a LOG_KEY secret also uploads the full run
+# log, traces and email as an encrypted artifact (see README to decrypt).
 
 on:
   schedule:
@@ -41,6 +44,8 @@ jobs:
       MAX_JOBS: ${{ inputs.max_jobs || '15' }}
       LOCATION: ${{ inputs.location || vars.LOCATION }}
       DUUNITORI_ENABLED: ${{ vars.DUUNITORI_ENABLED }}  # empty = off
+      DEBUG_LOGS: ${{ vars.DEBUG_LOGS }}  # empty = off
+      COLUMNS: "200"  # rich wraps console lines at 80 without a terminal
       LLM_BASE_URL: http://localhost:11434/v1
       LLM_API_KEY: ollama
       REASONING_EFFORT: none  # thinking on CPU eats the token budget
@@ -108,6 +113,32 @@ jobs:
             echo "::error::Run failed. Output is hidden because it contains CV details; reproduce locally."
             exit 1
           fi
+
+      - name: Scored jobs (DEBUG_LOGS; titles and scores only, no CV text)
+        if: always() && env.PRIVATE_CV == 'true' && env.DEBUG_LOGS == 'true'
+        run: cat data/out/*.jobs.txt 2>/dev/null || echo "No jobs report, the run stopped before scoring."
+
+      - name: Encrypt run log, traces and email (DEBUG_LOGS + LOG_KEY)
+        if: always() && env.PRIVATE_CV == 'true' && env.DEBUG_LOGS == 'true'
+        env:
+          LOG_KEY: ${{ secrets.LOG_KEY }}
+        run: |
+          if [ -z "$LOG_KEY" ]; then
+            echo "::warning::DEBUG_LOGS is on but the LOG_KEY secret is not set; no encrypted log uploaded."
+            exit 0
+          fi
+          cp "$RUNNER_TEMP/run.log" data/run.log 2>/dev/null || true
+          (cd data && tar czf "$RUNNER_TEMP/run-log.tar.gz" $(ls -d run.log traces out 2>/dev/null))
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -salt -in "$RUNNER_TEMP/run-log.tar.gz" -out "$RUNNER_TEMP/run-log.enc" -pass env:LOG_KEY
+          rm -f "$RUNNER_TEMP/run-log.tar.gz" data/run.log
+
+      - uses: actions/upload-artifact@v4
+        if: always() && env.PRIVATE_CV == 'true' && env.DEBUG_LOGS == 'true'
+        with:
+          name: run-log
+          path: ${{ runner.temp }}/run-log.enc
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Keep only sent job ids in the cached database
         if: always() && env.PRIVATE_CV == 'true'

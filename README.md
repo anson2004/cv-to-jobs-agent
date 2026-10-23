@@ -98,8 +98,17 @@ Settings for `local-llm-run` (Settings → Secrets and variables → Actions):
 | `RESEND_API_KEY`, `TO_EMAIL` | secret | Needed when `CV_URL` is set; results are emailed |
 | `LOCATION` | variable | e.g. `Tampere` |
 | `DUUNITORI_ENABLED` | variable | `true` to include Duunitori |
+| `DEBUG_LOGS` | variable | `true` prints the scored jobs (titles and scores, no CV text) in the log |
+| `LOG_KEY` | secret | With `DEBUG_LOGS`, uploads the full run log, traces and email as an encrypted `run-log` artifact (kept 7 days) |
 
-With `CV_URL` set, nothing about the CV is written to logs, artifacts or cache.
+With `CV_URL` set, nothing about the CV is written to logs, artifacts or cache
+unless encrypted. To read the debug artifact, download `run-log` from the run's
+Summary page (or `gh run download <run-id> -n run-log`), then:
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -in run-log.enc -out run-log.tar.gz -pass pass:'<LOG_KEY>'
+tar xzf run-log.tar.gz   # run.log, traces/<run_id>.jsonl (every model call), out/ (email, jobs report)
+```
 
 ## Configuration
 

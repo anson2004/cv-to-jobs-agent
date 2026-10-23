@@ -16,7 +16,7 @@ from ..config import Settings
 from ..cv import cv_to_text
 from ..deliver.email import deliver
 from ..llm import LLM
-from ..schemas import QueryPlan, RunStats, RunSummary
+from ..schemas import Job, JobScore, QueryPlan, RunStats, RunSummary
 from ..sources import build_sources
 from ..store import Store
 from ..trace import Tracer
@@ -29,7 +29,7 @@ from .team_plan import team_plan
 from .plan import plan_more, plan_queries
 from .prefilter import rank_pool
 from .score import score_jobs
-from .select import select_top
+from .select import is_local, select_top
 from .verify import verify as fact_check
 
 console = Console()
@@ -38,6 +38,19 @@ MIN_POOL = 15  # below this, ask the planner for more queries
 
 def new_run_id() -> str:
     return time.strftime("%Y%m%d-%H%M%S")
+
+
+def jobs_report(sources: list[str], location: str | None, pool_size: int, local_in_pool: int, scored: list[tuple[Job, JobScore]], picked: set[str]) -> str:
+    """Which jobs were scored and how. Jobs and numbers only, never CV or profile text,
+    so CI can print it in a public log (T = in the location, R = elsewhere/remote, * = picked)."""
+    lines = [f"sources: {', '.join(sources)} | location: {location or '-'} | pool {pool_size} ({local_in_pool} local)", "overall  skill sen loc grw  db   T/R  source      title — company [location]"]
+    for j, sc in sorted(scored, key=lambda x: x[1].overall, reverse=True):
+        mark = "*" if j.id in picked else " "
+        lines.append(
+            f"{mark}{sc.overall:5.2f}    {sc.skill_fit}    {sc.seniority_fit}   {sc.location_fit}   {sc.growth}   {'yes' if sc.dealbreaker_hit else ' - '}  "
+            f"{'T' if is_local(j, location) else 'R'}    {j.source:<10}  {j.title[:70]} — {j.company[:30]} [{j.location[:40]}]"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def run_pipeline(
@@ -109,7 +122,7 @@ def run_pipeline(
     if location:
         before = len(pool)
         pool = filter_by_location(pool, location)
-        console.print(f"[green]location[/] {before} -> {len(pool)} in or open to {location}")
+        console.print(f"[green]location[/] {before} -> {len(pool)} in or open to {location} ({sum(is_local(j, location) for j in pool)} in {location})")
     if skip_sent:
         sent = store.already_sent()
         before = len(pool)
@@ -149,6 +162,11 @@ def run_pipeline(
             console.print(f"[green]verify[/] {vr.line()}")
     for (j, sc), r in zip(picks, recs):
         console.print(f"[bold]{sc.overall:.2f}[/] {j.title} @ {j.company} [{j.location}]  — {r.one_line_pitch}")
+
+    by_id = {j.id: j for j in pool}
+    report = jobs_report([x.name for x in sources], location, len(ranked), sum(is_local(j, location) for j, _ in ranked), [(by_id[x.job_id], x) for x in scores if x.job_id in by_id], {j.id for j, _ in picks})
+    s.out_dir.mkdir(parents=True, exist_ok=True)
+    (s.out_dir / f"{run_id}.jobs.txt").write_text(report)
 
     # 6. deliver + remember
     delivered_to = deliver(s, run_id, profile, picks, recs, dry_run=dry_run)

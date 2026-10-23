@@ -20,7 +20,7 @@ MAX_PER_STEM = 2
 LOCAL_BONUS = 0.3  # on a 0-5 scale: breaks ties, does not override a clearly better remote job
 
 
-def _is_local(job: Job, location: str | None) -> bool:
+def is_local(job: Job, location: str | None) -> bool:
     if not location:
         return False
     import re
@@ -33,7 +33,7 @@ def select_top(jobs: list[Job], scores: list[JobScore], k: int, location: str | 
     by_id = {j.id: j for j in jobs}
 
     def rank_key(s: JobScore) -> tuple[float, bool]:
-        local = _is_local(by_id[s.job_id], location)
+        local = is_local(by_id[s.job_id], location)
         return (round(s.overall + (LOCAL_BONUS if local else 0.0), 2), local)  # equal scores: local first
 
     ranked = sorted((s for s in scores if s.job_id in by_id), key=rank_key, reverse=True)
