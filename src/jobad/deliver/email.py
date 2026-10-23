@@ -13,7 +13,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ..config import Settings
 from ..schemas import CandidateProfile, Job, JobScore, Recommendation
 
-_env = Environment(loader=FileSystemLoader(Path(__file__).parent), autoescape=select_autoescape(["html"]))
+# "j2" too: select_autoescape matches the last extension, and the template is email.html.j2.
+_env = Environment(loader=FileSystemLoader(Path(__file__).parent), autoescape=select_autoescape(["html", "j2"]))
 
 
 def render(run_id: str, profile: CandidateProfile, picks: list[tuple[Job, JobScore]], recs: list[Recommendation]) -> str:
