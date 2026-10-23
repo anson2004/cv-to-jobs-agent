@@ -6,14 +6,16 @@ This source is therefore off by default (DUUNITORI_ENABLED=true turns it on),
 makes a small number of requests per run with an identifying User-Agent and a
 pause between calls, and caches everything. Enable it for personal use only.
 
-`area` may list several cities ("Tampere, Helsinki"); each is swept separately
-and the results merged.
+The search ANDs its terms and matches titles, so a multi-word planner query
+returns only exact title matches. So each query is searched whole, and each of
+its distinctive words on its own, and the results are merged: "cash manager"
+searches "cash manager" and "cash". Generic words like "manager" or
+"specialist" are never searched alone, because they match every field. The
+words come from the planner, so from the CV; the source has no built-in field. Each word is cached
+per area, and at most MAX_TERMS new words are fetched per run.
 
-The search ANDs its terms and matches titles, so multi-word planner queries
-return nothing for a mid-sized city. The source is modelled as a feed: a few
-broad tech terms are swept for the area once per run, and the planner's
-queries are applied locally with any-term matching (Finnish postings still
-carry English tech words like Python, AWS, Go).
+`area` may list several cities ("Tampere, Helsinki"); each is searched
+separately and the results merged.
 """
 
 from __future__ import annotations
@@ -31,7 +33,16 @@ from ..schemas import Job
 from ..textutil import strip_html
 from .base import JobSource, JsonDict, NoneAsEmpty, Str, query_terms, split_places
 
-SWEEP_TERMS = ["software", "developer", "engineer", "ohjelmisto", "data", "cloud", "devops", "python", "java", "backend", "tekoäly", "ai"]
+MAX_TERMS = 24  # new searches per run; cached ones cost nothing
+# Role words shared by every field: searched alone they return sales, HR and IT jobs alike.
+GENERIC = {"manager", "specialist", "analyst", "administrator", "assistant", "coordinator", "expert", "consultant", "officer", "associate", "lead", "head", "team", "asiantuntija", "päällikkö", "koordinaattori", "assistentti", "analyytikko", "konsultti"}
+
+
+def search_terms(query: str) -> list[str]:
+    """The whole query, then each word that is specific enough to search alone."""
+    words = query_terms(query)
+    out = [" ".join(words)] if len(words) > 1 else []
+    return out + [w for w in words if w not in GENERIC]
 MAX_PAGES = 3
 PAUSE_S = 1.0
 _REMOTE = re.compile(r"\b(etätyö|etänä|remote|hybridi|hybrid)\b", re.I)
@@ -52,45 +63,47 @@ class DuunitoriFeed(BaseModel):
 
 class DuunitoriSource(JobSource):
     name = "duunitori"
-    kind = "feed"
+    kind = "search"
     URL = "https://duunitori.fi/api/v1/jobentries"
     area: str | None = None  # set by the pipeline from the location filter, e.g. "Tampere" or "Tampere, Helsinki"
 
+    def __init__(self, cache_dir: Path, offline: bool = False):
+        super().__init__(cache_dir, offline)
+        self._new_terms = 0
+
     def _request(self, client: httpx.Client, query: str) -> JsonDict:
+        """`query` is one search term, searched in every area."""
         results: dict[str, JsonDict] = {}
         areas: list[str | None] = [a for a in split_places(self.area or "")] or [None]
         for area in areas:
-            for term in SWEEP_TERMS:
-                for page in range(1, MAX_PAGES + 1):
-                    params: dict[str, Any] = {"search": term, "page": page}
-                    if area:
-                        params["area"] = area
-                    r = client.get(self.URL, params=params)
-                    if r.status_code != 200:
-                        break
-                    body: JsonDict = r.json()
-                    for it in body.get("results", []):
-                        results.setdefault(it["slug"], it)
-                    time.sleep(PAUSE_S)
-                    if not body.get("next"):
-                        break
+            for page in range(1, MAX_PAGES + 1):
+                params: dict[str, Any] = {"search": query, "page": page}
+                if area:
+                    params["area"] = area
+                r = client.get(self.URL, params=params)
+                if r.status_code != 200:
+                    break
+                body: JsonDict = r.json()
+                for it in body.get("results", []):
+                    results.setdefault(it["slug"], it)
+                time.sleep(PAUSE_S)
+                if not body.get("next"):
+                    break
         return {"results": list(results.values()), "area": self.area}
 
     def _key(self, query: str) -> Path:
         return super()._key(f"{query}|{self.area or 'all'}")
 
     def search(self, query: str) -> list[Job]:
-        if self._feed is None:
-            self._feed = self._parse(self._fetch("__feed__"))
-        terms = query_terms(query)
-        if not terms:
-            return list(self._feed)
-        out: list[Job] = []
-        for j in self._feed:
-            hay = f"{j.title}\n{j.description}".lower()
-            if any(t in hay for t in terms):
-                out.append(j)
-        return out
+        out: dict[str, Job] = {}
+        for term in search_terms(query):
+            if self._cached(term) is None and not self.offline:
+                if self._new_terms >= MAX_TERMS:
+                    continue  # politeness cap: no more new requests this run
+                self._new_terms += 1
+            for j in self._parse(self._fetch(term)):
+                out.setdefault(j.id, j)
+        return list(out.values())
 
     def _parse(self, raw: JsonDict) -> list[Job]:
         out: list[Job] = []

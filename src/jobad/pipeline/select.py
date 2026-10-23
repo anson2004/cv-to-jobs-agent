@@ -1,5 +1,7 @@
 """Step 7a: pick top-k with a diversity rule and an optional local preference. No LLM.
 
+Minimum score: nothing below `min_score` is recommended, so a run with no good
+match sends no picks rather than the best of the bad ones.
 Diversity: at most 2 jobs per company, at most 2 sharing a title stem, to avoid
 four near-identical recommendations. Local preference: when a location filter
 is set, postings physically in that place get a small bonus over remote ones,
@@ -29,14 +31,14 @@ def is_local(job: Job, location: str | None) -> bool:
     return bool(words & wanted_terms(location))
 
 
-def select_top(jobs: list[Job], scores: list[JobScore], k: int, location: str | None = None) -> list[tuple[Job, JobScore]]:
+def select_top(jobs: list[Job], scores: list[JobScore], k: int, location: str | None = None, min_score: float = 0.0) -> list[tuple[Job, JobScore]]:
     by_id = {j.id: j for j in jobs}
 
     def rank_key(s: JobScore) -> tuple[float, bool]:
         local = is_local(by_id[s.job_id], location)
         return (round(s.overall + (LOCAL_BONUS if local else 0.0), 2), local)  # equal scores: local first
 
-    ranked = sorted((s for s in scores if s.job_id in by_id), key=rank_key, reverse=True)
+    ranked = sorted((s for s in scores if s.job_id in by_id and s.overall >= min_score), key=rank_key, reverse=True)
     companies: Counter[str] = Counter()
     stems: Counter[str] = Counter()
     out: list[tuple[Job, JobScore]] = []

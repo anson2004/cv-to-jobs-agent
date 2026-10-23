@@ -68,3 +68,30 @@ def test_local_bonus_breaks_ties_only():
     picked = [j.id for j, _ in select_top([tampere, remote, better_remote], scores, k=3, location="Tampere")]
     assert picked == ["b", "t", "r"]  # clearly better remote job still first; Tampere wins the tie
     assert [j.id for j, _ in select_top([tampere, remote, better_remote], scores, k=3)][1] in ("t", "r")  # no location: no bonus
+
+
+def test_title_outside_the_candidates_field_is_halved_whatever_the_field():
+    from jobad.pipeline.prefilter import lexical_prior
+
+    def prior(title, roles):
+        return lexical_prior(Job(id=title, source="t", title=title, company="c", url="u", description="excel"), {"excel"}, set(), set(), roles=roles)
+
+    treasury = {"treasury", "analyst"}
+    assert prior("Treasury Analyst", treasury) == 2 * prior("Backend Developer", treasury)
+    assert prior("Pääkirjanpitäjä", {"kirjanpitäjä"}) == 2 * prior("Myyntiedustaja", {"kirjanpitäjä"})  # inside a Finnish compound
+    assert prior("Ohjelmistokehittäjä", {"kehittäjä"}) == 2 * prior("Kirjanpitäjä", {"kehittäjä"})
+
+
+def test_role_words_keep_role_nouns_and_drop_seniority():
+    from jobad.pipeline.prefilter import role_words
+    from jobad.schemas import CandidateProfile, SearchQuery, Seniority
+
+    p = CandidateProfile(name="A", headline="Aspiring Treasury Analyst seeking junior treasury role", years_experience=6, seniority=Seniority.mid, skills=[], domains=[], locations_ok=[], remote_ok=False, must_haves=[], dealbreakers=[], summary="s")
+    assert role_words(p, [SearchQuery(query="senior software engineer", reason="r")]) == {"treasury", "analyst", "software", "engineer"}
+
+
+def test_nothing_below_min_score_is_picked():
+    jobs = [job("1", "Treasury Analyst", "A"), job("2", "Backend Developer", "B")]
+    picked = [j.id for j, _ in select_top(jobs, [score("1", 3), score("2", 1)], k=4, min_score=2.5)]
+    assert picked == ["1"]
+    assert select_top(jobs, [score("2", 1)], k=4, min_score=2.5) == []

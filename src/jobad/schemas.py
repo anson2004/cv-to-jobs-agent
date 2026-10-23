@@ -23,7 +23,7 @@ class Seniority(str, Enum):
 
 class CandidateProfile(BaseModel):
     name: str
-    headline: str = Field(description="One line, e.g. 'Senior backend engineer moving into AI products'")
+    headline: str = Field(description="One line, e.g. 'Accountant moving into treasury' or 'Senior backend engineer moving into AI products'")
     years_experience: int = Field(ge=0, le=60)
     seniority: Seniority
     skills: list[str] = Field(description="Concrete, searchable skills: languages, frameworks, platforms")

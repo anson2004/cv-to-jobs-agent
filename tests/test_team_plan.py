@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from jobad.pipeline import team_plan as tp
 from jobad.pipeline.fetch import fetch_jobs
-from jobad.pipeline.prefilter import lexical_prior
 from jobad.schemas import CandidateProfile, Job, QueryPlan, SearchBrief, SearchQuery, Seniority
 from jobad.sources import query_terms
 
@@ -80,9 +79,5 @@ def test_no_duunitori_means_one_team():
     assert [t.name for t in tp.build_teams([FakeSource("jobicy"), FakeSource("remotive")])] == ["remote boards"]
 
 
-def test_finnish_words_survive_tokenizing_and_count_as_engineering():
+def test_finnish_words_survive_tokenizing():
     assert query_terms("backend-kehittäjä python") == ["backend-kehittäjä", "python"]
-    fi = Job(id="d:1", source="duunitori", title="Ohjelmistokehittäjä", company="C", url="u", description="Python")
-    sales = Job(id="d:2", source="duunitori", title="Myyntiedustaja", company="C", url="u2", description="Python")
-    # same description; only the Finnish engineering title escapes the non-engineering halving
-    assert lexical_prior(fi, {"python"}, set(), set()) == 2 * lexical_prior(sales, {"python"}, set(), set())

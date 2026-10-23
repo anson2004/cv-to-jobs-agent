@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     max_jobs_to_score: int = Field(40, ge=1)
     description_chars: int = Field(1800, ge=100)
     top_k: int = Field(4, ge=1)
+    min_score: float = Field(2.5, ge=0, le=5)  # never recommend below this overall score (0-5)
 
     # Location filter, one place or comma-separated ("Tampere, Helsinki"); empty = no filter. Also selects Duunitori's areas.
     location: str = ""

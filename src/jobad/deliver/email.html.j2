@@ -28,6 +28,9 @@
   <h1>{{ items|length }} jobs worth a look, {{ profile.name.split()[0] }}</h1>
   <div class="sub">Matched against: {{ profile.headline }}</div>
 
+  {% if not items %}
+  <div class="card"><div class="pitch">No posting this run was a good enough match ({{ min_score }}/5 or more). Nothing is recommended rather than weak matches.</div></div>
+  {% endif %}
   {% for it in items %}
   <div class="card">
     <div class="head">

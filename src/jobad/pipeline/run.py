@@ -153,9 +153,11 @@ def run_pipeline(
     console.print(f"  scored {len(scores)}/{len(pool)}; {dealbreakers} dealbreaker hits; best overall {max((x.overall for x in scores), default=0):.2f}")
 
     # 5. select + explain + fact-check
-    picks = select_top(pool, scores, top_k, location=location)
+    picks = select_top(pool, scores, top_k, location=location, min_score=s.min_score)
+    if not picks:
+        console.print(f"[yellow]no job scored {s.min_score} or more[/]; the email says so instead of recommending weak matches")
     try:
-        recs = explain(llm, profile, picks, s.model_strong)
+        recs = explain(llm, profile, picks, s.model_strong) if picks else []
     except Exception as e:  # the email must still go out with the scorer's own notes
         console.print(f"[yellow]explain failed[/] ({str(e)[:100]}); falling back to scorer justifications")
         recs = [notes_only(j, sc) for j, sc in picks]

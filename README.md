@@ -68,11 +68,19 @@ engineering roles in the prefilter: 5 → 6 Tampere jobs, for every planner.
 
 ## Job sources
 
-Arbeitnow, Jobicy and Remotive: public JSON APIs, no key, mostly remote jobs.
+Arbeitnow, Jobicy and Remotive: public JSON APIs, no key, mostly remote tech jobs.
 
-Duunitori (Finland) is the only source with Finnish on-site jobs. It is **off
-by default** because its `robots.txt` disallows bots; turn it on with
-`DUUNITORI_ENABLED=true` for personal use. All responses are cached in `data/cache`.
+Duunitori (Finland) covers every field and is the only source with Finnish
+on-site jobs. It is searched with the planner's queries, so with the words of
+the candidate's own field (for an accountant: "kirjanpitäjä", "treasury
+analyst"). It is **off by default** because its `robots.txt` disallows bots;
+turn it on with `DUUNITORI_ENABLED=true` for personal use. For a CV outside
+tech, nearly all good matches come from Duunitori. All responses are cached in
+`data/cache`.
+
+Nothing in the pipeline assumes a field: the prompts, the prefilter and the
+sources work from the CV. Jobs scoring below `MIN_SCORE` (default 2.5/5) are
+never recommended; if none reach it, the email says there was no good match.
 
 ## Local model (Docker)
 
@@ -114,7 +122,7 @@ tar xzf run-log.tar.gz   # run.log, traces/<run_id>.jsonl (every model call), ou
 
 All settings come from environment variables or `.env` (see `.env.example`).
 The main ones: `LLM_BASE_URL`, `LLM_API_KEY` (or `GROQ_API_KEY`),
-`MODEL_STRONG`, `MODEL_FAST`, `LOCATION`, `DUUNITORI_ENABLED`,
+`MODEL_STRONG`, `MODEL_FAST`, `LOCATION`, `DUUNITORI_ENABLED`, `MIN_SCORE`,
 `RESEND_API_KEY`, `TO_EMAIL`. Any OpenAI-compatible endpoint works.
 
 Groq's free tier allows 8K tokens per minute and 200K per day per model, which

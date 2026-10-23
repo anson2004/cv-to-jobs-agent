@@ -4,9 +4,9 @@ Dimensions, 0 (no fit) to 5 (ideal):
 
 skill_fit
 - 5: the candidate has every required skill and most nice-to-haves.
-- 3: the candidate has the core language/platform but lacks 1-2 required skills.
-- 1: a different stack; only generic overlap (e.g. "git", "agile").
-- 0: a different discipline entirely (sales, design, hardware, non-technical).
+- 3: the candidate has the core skills of the field but lacks 1-2 required ones.
+- 1: same broad field, different specialism; only generic overlap (e.g. "Excel", "agile").
+- 0: a different discipline entirely.
 - If the job requires 3 or more skills the candidate does not list, cap at 2.
 
 seniority_fit
@@ -22,7 +22,7 @@ growth
 - 5: the role is the candidate's stated target (see headline).
 - 3: a step toward it, using their new skills.
 - 1: more of the same as their past roles.
-- 0: a step away (less technical, different field).
+- 0: a step away (a different field, or backwards from their target).
 
 dealbreaker_hit: true if the posting clearly matches any listed dealbreaker. Do not guess; if the posting is silent, false.
 

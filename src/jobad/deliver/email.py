@@ -17,14 +17,14 @@ from ..schemas import CandidateProfile, Job, JobScore, Recommendation
 _env = Environment(loader=FileSystemLoader(Path(__file__).parent), autoescape=select_autoescape(["html", "j2"]))
 
 
-def render(run_id: str, profile: CandidateProfile, picks: list[tuple[Job, JobScore]], recs: list[Recommendation]) -> str:
+def render(run_id: str, profile: CandidateProfile, picks: list[tuple[Job, JobScore]], recs: list[Recommendation], min_score: float = 0.0) -> str:
     tpl = _env.get_template("email.html.j2")
     items = [{"job": j, "score": s, "rec": r} for (j, s), r in zip(picks, recs)]
-    return tpl.render(run_id=run_id, profile=profile, items=items)
+    return tpl.render(run_id=run_id, profile=profile, items=items, min_score=min_score)
 
 
 def deliver(settings: Settings, run_id: str, profile: CandidateProfile, picks: list[tuple[Job, JobScore]], recs: list[Recommendation], *, dry_run: bool = False) -> str:
-    html = render(run_id, profile, picks, recs)
+    html = render(run_id, profile, picks, recs, settings.min_score)
     settings.out_dir.mkdir(parents=True, exist_ok=True)
     out = settings.out_dir / f"{run_id}.html"
     out.write_text(html)
@@ -36,6 +36,7 @@ def deliver(settings: Settings, run_id: str, profile: CandidateProfile, picks: l
     import resend
 
     resend.api_key = settings.resend_api_key
-    subject = f"{len(picks)} jobs for {profile.name.split()[0]}: " + ", ".join(j.title for j, _ in picks[:2]) + ("…" if len(picks) > 2 else "")
+    first = profile.name.split()[0]
+    subject = (f"{len(picks)} jobs for {first}: " + ", ".join(j.title for j, _ in picks[:2]) + ("…" if len(picks) > 2 else "")) if picks else f"No good job matches for {first} this run"
     r = resend.Emails.send({"from": settings.from_email, "to": [settings.to_email], "subject": subject, "html": html})
     return f"emailed {settings.to_email} (resend id {r.get('id', '?')}); copy at {out}"

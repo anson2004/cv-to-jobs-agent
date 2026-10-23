@@ -36,10 +36,10 @@ TOOLS: list[ChatCompletionFunctionToolParam] = [
         "type": "function",
         "function": {
             "name": "search_jobs",
-            "description": "Search the job boards with a short keyword query (2-4 words). Returns the number of matching postings and a sample of titles with companies and locations.",
+            "description": "Search the job boards with a short keyword query (1-3 words). Returns the number of matching postings and a sample of titles with companies and locations.",
             "parameters": {
                 "type": "object",
-                "properties": {"query": {"type": "string", "description": "Keyword query, e.g. 'backend engineer python'"}},
+                "properties": {"query": {"type": "string", "description": "Keyword query in the candidate's field, e.g. 'treasury analyst'"}},
                 "required": ["query"],
                 "additionalProperties": False,
             },
